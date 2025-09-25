@@ -4,13 +4,13 @@
 
 
 import sys
-from PySide6 import QtWidgets as QTW
-from gui.winapp import Application
+from PySide6.QtWidgets import QApplication
+from gui.main_window import MainWindow
 
 
 def start_app():
-    app = QTW.QApplication(sys.argv)
-    window = Application()
+    app = QApplication(sys.argv)
+    window = MainWindow()
     window.show()
 
     sys.exit(app.exec())
