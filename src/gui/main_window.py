@@ -2,10 +2,13 @@
 """
 
 
-import sys
-from PySide6.QtWidgets import QWidget, QMainWindow, QVBoxLayout, QLabel, QTabWidget
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPalette
+# import sys
+from .fill_excel_columns_module import FillExcelColumns
+from PySide6.QtWidgets import (
+    QWidget, QMainWindow, QVBoxLayout, QTabWidget
+)
+# from PySide6.QtCore import Qt, QMimeData
+# from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPalette
 
 
 class MainWindow(QMainWindow):
@@ -35,11 +38,11 @@ class MainWindow(QMainWindow):
         self.tab_widget = QTabWidget()
 
         tab1 = QWidget()
-        tab2 = QWidget()
+        tab2 = FillExcelColumns()
         tab3 = QWidget()
 
-        self.tab_widget.addTab(tab1, "Первая вкладка")
-        self.tab_widget.addTab(tab2, "Вторая вкладка")
+        self.tab_widget.addTab(tab1, "Excel merger")
+        self.tab_widget.addTab(tab2, "Fill module")
         self.tab_widget.addTab(tab3, "Третья вкладка")
 
         layout.addWidget(self.tab_widget)
@@ -50,28 +53,8 @@ class MainWindow(QMainWindow):
     def choose_theme(self):
         pass
 
-    def drag_enter_event():
-        pass
-
-    def drop_event():
-        pass
-
-    def browse_file():
-        pass
-
     def light_theme(self):
         pass
 
     def dark_theme(self):
         pass
-
-
-class DragDropWidget(QWidget):
-    def __init__(self):
-        super().__init__()
-
-    def widget_ui(self):
-        main_layout = QVBoxLayout()
-
-        self.label = QLabel("Drag and drop files here", alignment=Qt.AlignmentFlag.AlignCenter)
-        self.label.setStyleSheet("")
