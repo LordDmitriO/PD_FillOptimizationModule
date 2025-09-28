@@ -2,7 +2,7 @@
 """
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog
+    QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox
 )
 from PySide6.QtCore import Qt  # QMimeData
 # from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPalette
@@ -43,9 +43,18 @@ class FillExcelColumns(QWidget):
     def drop_event(self, event):
         for url in event.mimeData().urls():
             file_path = url.toLocalFile()
-            print(f"File dropped: {file_path}")
+            if not self.check_file_extensions(file_path):
+                QMessageBox.warning(self, "Ошибка", "Неподдерживаемый тип файла!")
+            else:
+                print(f"File dropped: {file_path}")
 
     def browse_file(self):
         file_paths, _ = QFileDialog.getOpenFileNames(self, "Select files", "", "Excel-files (*.xlsx; *.xls)")
         for file_path in file_paths:
             print(f"File selected: {file_path}")
+
+    def check_file_extensions(self, file_path):
+        return file_path.endswith(('.xlsx', '.xls'))
+    
+    def parse_excel_data():
+        pass
