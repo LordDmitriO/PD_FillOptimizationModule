@@ -96,11 +96,12 @@ class FillExcelColumns(QWidget):
         chrome_options = wd.ChromeOptions()
         chrome_options.add_argument("--log-level=3")
         browser = wd.Chrome(options=chrome_options)
-        browser.get("https://www.rusprofile.ru/")
+        browser.get("https://www.rusprofile.ru/search-advanced")
         time.sleep(2)
-        open_search = browser.find_element(By.ID, "indexsearchform")
-        open_search.click()
-        search = browser.find_elements(By.NAME, "query")[1]
+        # url = "/search-advanced"
+        # open_search = browser.find_element(By.XPATH, "//a[@href='/search-advanced']")
+        # open_search.
+        search = browser.find_element(By.ID, "advanced-search-query")
         time.sleep(2)
         # time.sleep(2)
         for data_element in our_parse_data:
