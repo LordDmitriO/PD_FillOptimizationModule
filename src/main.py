@@ -3,17 +3,16 @@
 """
 
 
-import sys
 from PySide6.QtWidgets import QApplication
 from gui.main_window import MainWindow
 
 
 def start_app():
-    app = QApplication(sys.argv)
+    app = QApplication()
     window = MainWindow()
     window.show()
 
-    sys.exit(app.exec())
+    app.exec()
 
 
 def main():
