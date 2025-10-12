@@ -1,9 +1,11 @@
 """
 """
 
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# import sys
-from .fill_excel_columns_module import FillExcelColumns
+from gui.fill_excel_columns_module import FillExcelColumns
 from PySide6.QtWidgets import (
     QWidget, QMainWindow, QVBoxLayout, QTabWidget
 )
@@ -58,3 +60,13 @@ class MainWindow(QMainWindow):
 
     def dark_theme(self):
         pass
+
+
+if __name__ == '__main__':
+    from PySide6.QtWidgets import QApplication
+    import sys
+    
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())

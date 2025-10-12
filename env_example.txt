@@ -1,0 +1,8 @@
+# Скопируйте этот файл в .env и заполните своими значениями
+
+# GigaChat API Configuration
+GIGACHAT_AUTH_TOKEN=your_gigachat_token_here
+
+# RusProfile Configuration
+RUSPROFILE_DELAY=5
+RUSPROFILE_MAX_REQUESTS=100
