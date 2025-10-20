@@ -1,27 +1,22 @@
-"""
-"""
-
 import re
 import time
+import json
+import os
 import language_tool_python
 import pandas as pd
 from pymorphy3 import MorphAnalyzer as MA
-from selenium import webdriver as wd
-from selenium.webdriver.common.by import By
-# from selenium.webdriver.support.ui import WebDriverWait as WDW
-# from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.keys import Keys
-# from webdriver_manager.chrome import ChromeDriverManager as CDM
 from bs4 import BeautifulSoup as BS
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox,
     QSpinBox, QProgressBar, QTextEdit, QCheckBox
 )
-from PySide6.QtCore import Qt  # QMimeData
-# from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPalette
+from PySide6.QtCore import Qt
+import requests
+from urllib.parse import quote
 
-# Импортируем GigaChat API
-from gigachat_api import GigaChatAPI
+from .gigachat_api import GigaChatAPI
+from .validate_rusprofile import is_valid_match
+
 from config import GIGACHAT_AUTH_TOKEN, EXCEL_COLUMN_NAME
 
 
@@ -39,6 +34,9 @@ class FillExcelColumns(QWidget):
         else:
             self.gigachat_api = GigaChatAPI(GIGACHAT_AUTH_TOKEN)
 
+        # Результаты парсинга
+        self.parsed_results = []
+        
         self.widget_ui()
 
     def widget_ui(self):
@@ -146,15 +144,8 @@ class FillExcelColumns(QWidget):
             self.process_button.setEnabled(True)
             self.label.setText(f"Файл загружен: {len(self.df)} записей")
             
-            self.parse_excel_data()
         except Exception as e:
             QMessageBox.warning(self, "Ошибка", f'Не удалось обработать файл: {str(e)}')
-
-    def parse_excel_data(self):
-        raw_data_column = self.analyze_file()
-        processed_data_column = self.convert_name_for_parse(raw_data_column)
-
-        self.parse_data(processed_data_column)
 
     def analyze_file(self):
         try:
@@ -170,28 +161,19 @@ class FillExcelColumns(QWidget):
         tool = language_tool_python.LanguageTool('ru')
 
         def create_correct_spelling(word):
-            # tool = language_tool_python.LanguageTool('ru')
-
-            # word = 'лицей'
             matches = tool.check(word)
             if matches:
                 corrected_word = tool.correct(word)
             else:
                 corrected_word = word
-            result_correct_word = corrected_word
-
-            return result_correct_word
+            return corrected_word
 
         def remove_geo_mentions(text):
-            # result_correct_text = re.sub(r'\b(г\.?|город|село|округ|г.\.?|пос\.?|д\.?|станица|хутор|район|область|край|республика)\s+\w+', '', text, flags=re.IGNORECASE)
             result_correct_text = re.sub(r'(.*)".*$', r'\1"', text)
-
             return result_correct_text
 
         def clean_text(text):
-
             quoted_parts = re.findall(r'"(.*?)"', text)
-            
             temp_text = text
             
             for part in quoted_parts:
@@ -221,12 +203,9 @@ class FillExcelColumns(QWidget):
             for word in words:
                 corrected_word = create_correct_spelling(word)
                 corrected_words.append(corrected_word)
-                # time.sleep(10)
             cleaned_text = " ".join(corrected_words)
 
-            result_clean_text = cleaned_text
-
-            return result_clean_text
+            return cleaned_text
 
         result = []
         for company_name in raw_data_column:
@@ -237,144 +216,311 @@ class FillExcelColumns(QWidget):
         return result
 
     def parse_data(self, our_parse_data):
-        # driver = CDM().install()
+        """Улучшенный парсинг с более надежным поиском"""
         main_url = "https://www.rusprofile.ru"
-        chrome_options = wd.ChromeOptions()
-        chrome_options.add_argument("--log-level=3")
-        # chrome_options.add_argument("--headless")
-        browser = wd.Chrome(options=chrome_options)
-        browser.get(main_url + "/search-advanced")
-        time.sleep(2)
-        # url = "/search-advanced"
-        # open_search = browser.find_element(By.XPATH, "//a[@href='/search-advanced']")
-        # open_search.
-        # time.sleep(2)
-        search = browser.find_element(By.ID, "advanced-search-query")
-        for data_element in our_parse_data:
-            search.send_keys(data_element)
-            time.sleep(5)
-            soup = BS(browser.page_source, "html.parser")
-            all_publications = soup.find_all("a", {"class": "list-element__title"})
-            print(data_element)
-            if all_publications:
-                self.parse_full_company_name(browser, main_url, all_publications)
-                time.sleep(3)
-                browser.back()
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
+        })
+        
+        total = len(our_parse_data)
+        found_count = 0
+        not_found_count = 0
+        
+        for idx, data_element in enumerate(our_parse_data, 1):
+            self.log(f"\n[{idx}/{total}] Поиск: {data_element}")
+            self.progress_bar.setValue(int(idx / total * 100))
+            
+            search_url = f"{main_url}/search?query={quote(data_element)}&type=ul"
+            
+            try:
+                response = session.get(search_url, timeout=15)
+                response.raise_for_status()
+                time.sleep(1.5)
+                
+                soup = BS(response.content, "html.parser")
+                result_found = False
+            
+                id_links = soup.find_all('a', href=re.compile(r'^/id/\d+$'))
+                if id_links:
+                    result_url = main_url + id_links[0]['href']
+                    company_data = self.parse_full_company_name(session, result_url)
+                    if company_data:
+                        self.parsed_results.append(company_data)
+                        found_count += 1
+                        result_found = True
+                        self.log(f"  ✓ Найдено: {company_data.get('Название организации:', '')}")
+                    time.sleep(1.5)
+                
+                if not result_found:
+                    not_found_count += 1
+                    self.log(f"  ✗ Не найдено")
+                    self.parsed_results.append({
+                        "Название организации:": "НЕ НАЙДЕНО",
+                        "Название организации в род падеже:": "",
+                        "Адрес организации:": "",
+                        "Индекс:": ""
+                    })
+                        
+            except Exception as e:
+                not_found_count += 1
+                self.log(f"  ✗ Ошибка: {str(e)}")
+                self.parsed_results.append({
+                    "Название организации:": "ОШИБКА",
+                    "Название организации в род падеже:": "",
+                    "Адрес организации:": "",
+                    "Индекс:": ""
+                })
+                
+            time.sleep(2)
+        
+        self.log(f"Парсинг завершен!")
+        self.log(f"Найдено: {found_count} ({found_count/total*100:.1f}%)")
+        self.log(f"Не найдено: {not_found_count} ({not_found_count/total*100:.1f}%)")
+
+    def parse_full_company_name(self, session, result_url):
+        try:
+            response = session.get(result_url, timeout=15)
+            response.raise_for_status()
+            time.sleep(1.5)
+            
+            soup = BS(response.content, 'html.parser')
+            
+            company_info = {}
+            
+            # название - несколько методов
+            full_name = soup.find('h1', class_='company-header__title')
+            if not full_name:
+                full_name = soup.find('div', class_='company-header__title')
+            if not full_name:
+                full_name = soup.find('h1')
+            
+            if full_name:
+                name = full_name.get_text(strip=True)
+                company_info["Название организации:"] = name
             else:
-                print("Ничего не найдено!")
-            time.sleep(3)
-            # search = browser.find_elements(By.NAME, "query")[1]
-            search.send_keys(Keys.CONTROL + 'a')
-            search.send_keys(Keys.DELETE)
-            # search.send_keys(Keys.ENTER)
-        time.sleep(2)
-        browser.quit()
-        # time.sleep(2)
-        # open_search = browser.find_element(By.ID, "indexsearchform")
-        # open_search.click()
-        # time.sleep(2)
-        # search = browser.find_elements(By.NAME, "query")[1]
-        # # browser.execute_script("arguments[0].send_keys('Школа 58');", search)
-        # search.send_keys("Школа 58")
-        # search.send_keys(Keys.ENTER)
+                return None
+            
+            address = ""
+            address_index = None
+            
+            # ищем блок с адресом
+            address_section = soup.find('div', class_='company-info__text', string=re.compile(r'Адрес'))
+            if address_section:
+                address_value = address_section.find_next_sibling('div', class_='company-info__text')
+                if address_value:
+                    address = address_value.get_text(strip=True)
+            
+            # если не нашли в блоке, ищем по паттерну в тексте
+            if not address:
+                text_content = soup.get_text()
+                # ищем адрес до ключевых слов (Руководитель, Среднесписочная и т.д.)
+                addr_match = re.search(
+                    r'(\d{6}[,\s]+[^\.]+?(?:область|край|республика|город|улица|ул\.|д\.|дом|проспект|пр-кт)[^\.]{0,100}?(?=\s+(?:Еще|Руководитель|Среднесписочная|Специальный|\d{6}|$)))',
+                    text_content,
+                    re.IGNORECASE
+                )
+                if addr_match:
+                    address = addr_match.group(1).strip()
+                    # очищаем от мусора
+                    address = re.sub(r'\s+', ' ', address)
+                    address = re.split(r'(?=Еще\s+\d+\s+организаци)', address)[0].strip()
+            
+            # извлекаем индекс
+            if address:
+                idx_match = re.search(r'\b(\d{6})\b', address)
+                if idx_match:
+                    address_index = idx_match.group(1)
+            
+            company_info["Адрес организации:"] = address
+            company_info["Индекс:"] = address_index
+            
+            # оодительный падеж
+            rod_name = ""
+            # rod_name = self.generate_genitive_case(name)
+            company_info["Название организации в род падеже:"] = rod_name
+            
+            return company_info
+            
+        except Exception as e:
+            print(f"Ошибка при парсинге страницы {result_url}: {str(e)}")
+            return None
 
-    def parse_full_company_name(self, browser, main_url, all_publications):
-        string_count = 2
-        organizations_data_arr = []
-        if all_publications:
-            for article in all_publications:
-                browser.get(main_url + article["href"])
-                time.sleep(2)
-                company_info = {}
-                name = browser.find_element(By.ID, "clip_name-long")
-                address = browser.find_element(By.ID, "clip_address")
-                company_info["Номер строки:"] = string_count
-                company_info["Название организации:"] = name.text
-                company_info["Адрес организации:"] = address.text
-                organizations_data_arr.append(company_info)
-                string_count += 1
-        self.create_complete_data(organizations_data_arr)
+    # def generate_genitive_case(self, name):
+        # добавить код
 
-    def create_complete_data(self, organizations_data_arr):
-        morph = MA()
-        for company_info in organizations_data_arr:
-            upd_name = company_info["Название организации:"].title()
-            words = upd_name.split()
-            transformed_words = []
-            in_quotes = False
 
-            for word in words:
-                if word.startswith('"') and word.endswith('"'):
-                    transformed_words.append(word)
-                elif word.startswith('"'):
-                    in_quotes = True
-                    transformed_words.append(word)
-                elif word.endswith('"'):
-                    in_quotes = False
-                    transformed_words.append(word)
-                elif in_quotes:
-                    transformed_words.append(word)
-                else:
-                    parsed = morph.parse(word)[0]
-                    transformed_word = parsed.inflect({'gent'})
-                    if transformed_word:
-                        transformed_words.append(transformed_word.word)
-                    else:
-                        transformed_words.append(word)
-            result_rod_name = ' '.join(transformed_words)
-
-            address = company_info["Адрес организации:"]
-            match = re.search(r'\b\d{6}\b', address)
-            if match:
-                address_index = match.group()
-            else:
-                address_index = None
-
-            company_info.update({"Название организации:": upd_name, "Название организации в род падеже:": result_rod_name, "Индекс:": address_index})
-
-            print(company_info)
-
-    # Методы для работы с GigaChat
     def log(self, message):
-        """Добавляет сообщение в лог"""
         self.log_text.append(message)
 
     def start_processing(self):
-        """Запускает обработку данных с использованием GigaChat"""
         if not hasattr(self, 'df') or self.df is None:
             self.log("Ошибка: файл не загружен")
             return
-        
-        self.log("\n=== Начало обработки с GigaChat ===")
+
+        self.log("\n=== Начало обработки ===")
         self.process_button.setEnabled(False)
         self.progress_bar.setValue(0)
-        
-        # Здесь можно добавить логику обработки с GigaChat
-        # Пока что просто логируем настройки
-        self.log(f"Использовать GigaChat: {self.use_gigachat_checkbox.isChecked()}")
-        self.log(f"Максимум запросов: {self.max_requests_spinbox.value()}")
-        
-        # Симуляция обработки
-        self.simulate_processing()
+        self.parsed_results = []
 
-    def simulate_processing(self):
-        """Симуляция обработки для демонстрации"""
-        import time
-        from PySide6.QtCore import QTimer
-        
-        self.progress = 0
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_progress)
-        self.timer.start(100)  # Обновляем каждые 100мс
-
-    def update_progress(self):
-        """Обновляет прогресс-бар"""
-        self.progress += 2
-        self.progress_bar.setValue(self.progress)
-        
-        if self.progress >= 100:
-            self.timer.stop()
+        try:
+            # извлекаем данные
+            raw_data = self.analyze_file()
+            self.log(f"Извлечено {len(raw_data)} записей")
+            
+            # предобработка
+            processed_data = self.convert_name_for_parse(raw_data)
+            self.log("Предобработка завершена")
+            
+            # парсинг
+            self.parse_data(processed_data)
+            
+            # формируем результирующий DataFrame
+            self.result_df = self._create_result_dataframe()
+            
+            self.progress_bar.setValue(100)
             self.processing_finished()
+            
+        except Exception as e:
+            self.log(f"✗ Ошибка обработки: {str(e)}")
+            QMessageBox.critical(self, "Ошибка", f"Ошибка обработки: {str(e)}")
+
+    def _expand_abbreviations(self, text):
+        if not isinstance(text, str):
+            return text
+
+        path = os.path.join(os.path.dirname(__file__), 'resources', 'abbreviations.json')
+        with open(path, 'r', encoding='utf-8') as f:
+            mapping = json.load(f)
+
+        for abbr, full in mapping.items():
+            pattern_start = rf'^\s*{abbr}\b'
+            if re.search(pattern_start, text, flags=re.IGNORECASE):
+                text = re.sub(pattern_start, full, text, flags=re.IGNORECASE)
+                break
+
+        for abbr, full in mapping.items():
+            pattern_inside = rf'\b{abbr}\b'
+            text = re.sub(pattern_inside, full, text, flags=re.IGNORECASE)
+
+        return text
+
+    def _normalize_locally(self, name):
+        """Локальная нормализация без GigaChat"""
+        if not isinstance(name, str):
+            return name
+
+        name = name.strip()
+        
+        # Сначала расшифровываем аббревиатуры
+        name = self._expand_abbreviations(name)
+
+        # Сохраняем содержимое кавычек без изменения
+        # Ищем текст в кавычках (любых)
+        quoted_parts = []
+        quote_pattern = r'[«""]([^»""]+)[»""]'
+        
+        def save_quoted(match):
+            quoted_parts.append(match.group(1))
+            return f'<<<QUOTE{len(quoted_parts)-1}>>>'
+        
+        temp_name = re.sub(quote_pattern, save_quoted, name)
+        
+        # Приводим к Title Case (каждое слово с заглавной)
+        words = temp_name.split()
+        cap_words = []
+        for w in words:
+            # Пропускаем наши заглушки
+            if w.startswith('<<<QUOTE'):
+                cap_words.append(w)
+            # Аббревиатуры оставляем как есть
+            elif w.isupper() and len(w) <= 6:
+                cap_words.append(w)
+            # Слова через дефис
+            elif '-' in w:
+                cap_words.append('-'.join(seg.capitalize() for seg in w.split('-')))
+            else:
+                cap_words.append(w.capitalize())
+        
+        result = ' '.join(cap_words)
+        
+        # Возвращаем кавычки обратно как «ёлочки»
+        for i, quoted_text in enumerate(quoted_parts):
+            result = result.replace(f'<<<QUOTE{i}>>>', f'«{quoted_text}»')
+        
+        # Убираем пробел после №
+        result = re.sub(r'№\s+(\d)', r'№\1', result)
+        
+        # Сжимаем множественные пробелы
+        result = re.sub(r'\s+', ' ', result).strip()
+        
+        return result
+
+    def _create_result_dataframe(self):
+        """Создает итоговый DataFrame с результатами"""
+        results = []
+        use_giga = self.use_gigachat_checkbox.isChecked() and self.gigachat_api is not None
+        max_reqs = self.max_requests_spinbox.value()
+        used_reqs = 0
+
+        for idx, row in self.df.iterrows():
+            original_name = row.get(EXCEL_COLUMN_NAME)
+            
+            # Данные из парсинга
+            if idx < len(self.parsed_results):
+                parsed = self.parsed_results[idx]
+                parsed_name = parsed.get("Название организации:", "")
+                
+                # Если найдено в RusProfile - используем с нормализацией
+                if parsed_name and parsed_name not in ["НЕ НАЙДЕНО", "ОШИБКА"]:
+                    if not is_valid_match(str(original_name), parsed_name, parsed.get("Адрес организации:", "")):
+                        self.log(f"Отбраковано: {parsed_name}")
+                        parsed_name = "" # заглушка
+
+                    # Нормализуем название из RusProfile
+                    normalized = self._normalize_locally(parsed_name)
+                    source = "RusProfile"
+                    
+                    results.append({
+                        'Исходное название': original_name,
+                        'Нормализованное название': normalized,
+                        'Родительный падеж': parsed.get("Название организации в род падеже:", ""),
+                        'Адрес': parsed.get("Адрес организации:", ""),
+                        'Индекс': parsed.get("Индекс:", ""),
+                        'Источник': source,
+                    })
+                    continue
+            
+            # Если не найдено в RusProfile - пробуем GigaChat
+            normalized = None
+            rod_padezh = ""
+            source = 'Локально'
+
+            if use_giga and used_reqs < max_reqs:
+                try:
+                    self.log(f"  → Использую GigaChat ({used_reqs+1}/{max_reqs})...")
+                    normalized = self.gigachat_api.normalize_school_name(str(original_name))
+                    
+                    if normalized and normalized != 'Ошибка':
+                        source = 'GigaChat'
+                        used_reqs += 1
+                        # Генерируем родительный падеж для результата GigaChat
+                        # rod_padezh = self.generate_genitive_case(normalized)
+                        self.log(f"  ✓ GigaChat: {normalized}")
+                    else:
+                        self.log(f"  ✗ GigaChat вернул ошибку")
+                        normalized = None
+                        
+                except Exception as e:
+                    self.log(f"  ✗ Ошибка GigaChat: {str(e)}")
+                    normalized = None
+
+        self.log(f"\n=== Статистика GigaChat ===")
+        self.log(f"Использовано запросов: {used_reqs}/{max_reqs}")
+        
+        return pd.DataFrame(results)
 
     def processing_finished(self):
         """Завершение обработки"""
@@ -390,21 +536,13 @@ class FillExcelColumns(QWidget):
         
         if file_path:
             try:
-                # Здесь должна быть логика сохранения результатов
-                self.log(f"✓ Результат сохранен: {file_path}")
-                QMessageBox.information(self, "Успех", "Результат успешно сохранен!")
+                if hasattr(self, 'result_df') and self.result_df is not None:
+                    self.result_df.to_excel(file_path, index=False)
+                    self.log(f"✓ Результат сохранен: {file_path}")
+                    QMessageBox.information(self, "Успех", "Результат успешно сохранен!")
+                else:
+                    self.log("✗ Нет данных для сохранения")
+                    QMessageBox.warning(self, "Ошибка", "Нет данных для сохранения!")
             except Exception as e:
+                self.log(f"✗ Ошибка сохранения: {str(e)}")
                 QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл: {str(e)}")
-
-    def normalize_with_gigachat(self, name):
-        """Нормализация названия с помощью GigaChat"""
-        try:
-            if self.use_gigachat_checkbox.isChecked() and self.gigachat_api:
-                normalized = self.gigachat_api.normalize_school_name(name)
-                self.log(f"GigaChat нормализовал: {name} -> {normalized}")
-                return normalized
-            else:
-                return name
-        except Exception as e:
-            self.log(f"Ошибка GigaChat: {str(e)}")
-            return name
