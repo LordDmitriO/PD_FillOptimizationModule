@@ -11,8 +11,8 @@ import language_tool_python
 from queue import Queue
 from pymorphy3 import MorphAnalyzer as MA
 
-from gensim.models import Word2Vec
-from gensim.utils import simple_preprocess
+# from gensim.models import Word2Vec
+# from gensim.utils import simple_preprocess
 
 from selenium import webdriver as wd
 from selenium.webdriver.common.by import By
@@ -35,6 +35,7 @@ class FillExcelColumns(QWidget):
     def __init__(self):
         super().__init__()
 
+        self.humanizer = Humanization()
         self.setWindowTitle("Drag and Drop Files")
         self.setGeometry(100, 100, 400, 300)
 
@@ -223,6 +224,7 @@ class FillExcelColumns(QWidget):
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--start-maximized")
         chrome_options.add_argument("--incognito")
+        # chrome_options.add_argument("--headless")
 
         user_agents = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -239,42 +241,58 @@ class FillExcelColumns(QWidget):
         selected_user_agent = rd.choice(user_agents)
         chrome_options.add_argument(f'--user-agent={selected_user_agent}')
 
-        # chrome_options.add_argument("--headless")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option("useAutomationExtension", False)
+
         browser = wd.Chrome(options=chrome_options)
         browser.get(main_url + "/search-advanced")
+        self.humanizer.human_like_wait(2)
         # url = "/search-advanced"
         # open_search = browser.find_element(By.XPATH, "//a[@href='/search-advanced']")
         try:
-            search = WDW(browser, 10).until(
-                EC.presence_of_element_located((By.ID, "advanced-search-query"))
+            search = self.humanizer.human_like_wait_for_element(
+                browser, (By.ID, "advanced-search-query"), 10
             )
         except TimeoutException:
-            print("Элемент не найден!")
+            print("Поисковая строка расширенного поиска не найдена!")
+            browser.quit
+
+            return
 
         string_count = 2
 
         for data_element in our_parse_data:
-            search.send_keys(Keys.CONTROL + 'a')
-            search.send_keys(Keys.DELETE)
+            # search.send_keys(Keys.CONTROL + 'a')
+            # search.send_keys(Keys.DELETE)
 
-            search.send_keys(data_element)
+            # search.send_keys(data_element)
+
+            self.humanizer.human_like_type(browser, search, data_element)
+            self.humanizer.random_mouse_movement(browser, search)
+
+            search.send_keys(Keys.ENTER)
+            self.humanizer.human_like_wait(1.5)
 
             try:
-                search_result = WDW(browser, 5).until(
-                        EC.presence_of_element_located((By.CLASS_NAME, "list-element__title"))
+                search_result = self.humanizer.human_like_wait_for_element(
+                    browser, (By.CLASS_NAME, "list-element__title"), 5
                 )
-                WDW(browser, 5).until(
-                    EC.staleness_of(search_result)
-                )
+                if search_result:
+                    self.humanizer.human_like_wait(rd.uniform(0.5, 1.0))
+                # WDW(browser, 5).until(
+                #     EC.staleness_of(search_result)
+                # )
             except Exception as e:
                 pass
 
             try:
-                WDW(browser, 5).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "list-element__title"))
+                # WDW(browser, 5).until(
+                #     EC.presence_of_element_located((By.CLASS_NAME, "list-element__title"))
+                # )
+                self.humanizer.human_like_wait_for_element(
+                    browser, (By.CLASS_NAME, "list-element__title"), 5
                 )
+                self.humanizer.human_like_scroll(browser)
 
                 soup = BS(browser.page_source, "lxml")
                 all_publications = soup.find_all("a", {"class": "list-element__title"})
@@ -283,8 +301,11 @@ class FillExcelColumns(QWidget):
                 print(f'Ошибка при поиске {data_element}: превышено время ожидания')
                 all_publications = None
                 try:
-                    WDW(browser, 5).until(
-                        EC.element_to_be_clickable((By.ID, "advanced-search-query"))
+                    # WDW(browser, 5).until(
+                    #     EC.element_to_be_clickable((By.ID, "advanced-search-query"))
+                    # )
+                    self.humanizer.human_like_wait_for_element(
+                        browser, (By.ID, "advanced-search-query"), 5
                     )
                 except TimeoutException:
                     print("Поле поиска недоступно, выполнение программы прервано!")
@@ -294,19 +315,35 @@ class FillExcelColumns(QWidget):
             self.parse_full_company_name(browser, main_url, all_publications, string_count)
             string_count += 1
             if all_publications:
-                current_url = browser.current_url
-                browser.back()
-                WDW(browser, 10).until(
-                    EC.url_changes(current_url)
-                )
-                WDW(browser, 10).until(
-                    EC.element_to_be_clickable((By.ID, "advanced-search-query"))
+                # current_url = browser.current_url
+                try:
+                    back_button = browser.find_element(By.XPATH, "//a[contains(text(),'Назад')] | //button[contains(text(),'Назад')]")
+                    self.humanizer.human_like_click(browser, back_button)
+                except Exception as e:
+                    browser.back()
+                # browser.back()
+                # WDW(browser, 10).until(
+                #     EC.url_changes(current_url)
+                # )
+                # WDW(browser, 10).until(
+                #     EC.element_to_be_clickable((By.ID, "advanced-search-query"))
+                # )
+                self.humanizer.human_like_wait_for_element(
+                    browser, (By.ID, "advanced-search-query"), 10
                 )
             else:
                 # print("Ничего не найдено!")
-                WDW(browser, 10).until(
-                    EC.element_to_be_clickable((By.ID, "advanced-search-query"))
+                # WDW(browser, 10).until(
+                #     EC.element_to_be_clickable((By.ID, "advanced-search-query"))
+                # )
+                self.humanizer.human_like_wait(1)
+                self.humanizer.human_like_wait_for_element(
+                    browser, (By.ID, "advanced-search-query"), 10
                 )
+
+            search = self.humanizer.human_like_wait_for_element(
+                browser, (By.ID, "advanced-search-query"), 5
+            )
             # search = browser.find_elements(By.NAME, "query")[1]
             # search.send_keys(Keys.ENTER)
         # time.sleep(2)
@@ -326,19 +363,45 @@ class FillExcelColumns(QWidget):
         if all_publications:
             # for article in all_publications:
             article = all_publications[0]
-            browser.get(main_url + article["href"])
+            # browser.get(main_url + article["href"])
             try:
-                name = WDW(browser, 10).until(
-                    EC.presence_of_element_located((By.ID, "clip_name-long"))
+                # name = WDW(browser, 10).until(
+                #     EC.presence_of_element_located((By.ID, "clip_name-long"))
+                # )
+                link_element = self.humanizer.human_like_wait_for_element(
+                    browser, (By.XPATH, f"//a[@href='{article['href']}']"), 5
+                )
+                if link_element:
+                    self.humanizer.human_like_click(browser, link_element)
+                else:
+                    browser.get(main_url + article["href"])
+            except TimeoutException:
+                # print("Элемент не найден!")
+                browser.get(main_url + article["href"])
+
+            self.humanizer.human_like_wait(1.5)
+            self.humanizer.human_like_scroll(browser)
+
+            try:
+                # address = WDW(browser, 10).until(
+                #     EC.presence_of_element_located((By.ID, "clip_address"))
+                # )
+                name = self.humanizer.human_like_wait_for_element(
+                    browser, (By.ID, "clip_name-long"), 10
                 )
             except TimeoutException:
-                print("Элемент не найден!")
+                # print("Элемент не найден!")
+                print("Элемент названия не найден!")
+                name = None
+
             try:
-                address = WDW(browser, 10).until(
-                    EC.presence_of_element_located((By.ID, "clip_address"))
+                address = self.humanizer.human_like_wait_for_element(
+                    browser, (By.ID, "clip_address"), 10
                 )
             except TimeoutException:
-                print("Элемент не найден!")
+                print("Элемент адреса не найден!")
+                address = None
+
             company_info["Номер строки:"] = string_count
             company_info["Название организации:"] = name.text
             company_info["Адрес организации:"] = address.text
@@ -350,6 +413,7 @@ class FillExcelColumns(QWidget):
             company_info["Название организации в род падеже:"] = None
             company_info["Индекс:"] = None
             organizations_data_arr.append(company_info)
+
         self.create_complete_data(organizations_data_arr)
 
     def create_complete_data(self, organizations_data_arr):
@@ -393,70 +457,138 @@ class FillExcelColumns(QWidget):
             print(company_info)
 
 
-# class Humanization:
-#     def __init__(self):
-#         super().__init__()
+class Humanization:
+    def __init__(self):
+        self.type_pause_time = rd.uniform(0.01, 0.1)
+        self.scroll_pause_time = rd.uniform(1.0, 2.0)
+        self.scroll_up = rd.randint(100, 300)
 
-#         self.type_pause_time = rd.uniform(0.1, 0.3)
-#         self.scroll_pause_time = rd.uniform(1.0, 2.0)
-#         self.scroll_up = rd.randint(100, 300)
+    def human_like_type(self, browser, element, text):
+        try:
+            actions = AC(browser)
+            actions.move_to_element(element)
+            actions.click()
+            actions.perform()
 
-#     def human_like_type(self, browser, element, text):
-#         actions = AC(browser)
-#         actions.move_to_element(element)
-#         actions.click()
-#         actions.perform()
+            element.clear()
+            time.sleep(rd.uniform(0.1, 0.3))
 
-#         if element.get_attribute():
-#             pass
+            for char in text:
+                element.send_keys(char)
+                time.sleep(self.type_pause_time)
 
-#         for char in text:
-#             actions.send_keys(char)
-#             time.sleep(self.type_pause_time)
+                if rd.random() < 0.05:
+                    wrong_char = rd.choice(string.ascii_lowercase)
+                    element.send_keys(wrong_char)
+                    time.sleep(rd.uniform(0.1, 0.2))
+                    element.send_keys(Keys.BACKSPACE)
+                    time.sleep(rd.uniform(0.1, 0.2))
 
-#             if rd.random() < 0.05:
-#                 actions.send_keys(rd.choice(string.ascii_lowercase))
-#                 time.sleep(rd.uniform(0.1, 0.2))
-#                 actions.send_keys(u'\ue003')
+        except Exception as e:
+            print(f"Ошибка при вводе текста: {e}")
+            element.clear()
+            element.send_keys(text)
 
-#         actions.perform()
+    def human_like_scroll(self, browser):
+        try:
+            last_height = browser.execute_script("return document.body.scrollHeight")
+            current_scroll = 0
 
-#     def human_like_scroll(self, browser):
-#         last_height = browser.execute_script("return document.body.scrollHeight")
+            while current_scroll < last_height:
+                scroll_amount = rd.randint(200, 500)
+                current_scroll += scroll_amount
 
-#         while True:
-#             browser.execute_script(f"window.scrollTo(0, {self.scroll_up});")
-#             time.sleep(self.scroll_pause_time)
+                if current_scroll > last_height:
+                    current_scroll = last_height
 
-#             new_height = browser.execute_script("return document.body.scrollHeight")
-#             if new_height == last_height:
-#                 break
-#             last_height = new_height
+                browser.execute_script(f"window.scrollTo(0, {current_scroll});")
+                time.sleep(self.scroll_pause_time)
 
-#     def human_like_click(self, browser, element):
-#         actions = AC(browser)
-#         actions.move_to_element(element)
-#         time.sleep(rd.uniform(0.5, 1.5))
-#         actions.click().perform()
+                if rd.random() < 0.3:
+                    time.sleep(rd.uniform(0.5, 1.5))
 
-#     def human_like_hover(self, browser, element):
-#         actions = AC(browser)
-#         actions.move_to_element(element)
-#         time.sleep(rd.uniform(1, 2))
-#         actions.perform()
+                new_height = browser.execute_script("return document.body.scrollHeight")
+                if new_height > last_height:
+                    last_height = new_height
 
-#     def human_like_wait(self, seconds):
-#         time.sleep(rd.uniform(seconds - 0.5, seconds + 0.5))
+            if rd.random() < 0.5:
+                scroll_back = rd.randint(100, 300)
+                browser.execute_script(f"window.scrollTo(0, {current_scroll - scroll_back});")
+                time.sleep(rd.uniform(0.5, 1.0))
 
-#     def human_like_wait_for_element(self, browser, locator, timeout=10):
-#         try:
-#             element = WDW(browser, timeout).until(
-#                 EC.presence_of_element_located(locator)
-#             )
-#             self.human_like_wait(rd.uniform(0.5, 1.5))
+        except Exception as e:
+            print(f"Ошибка при прокрутке: {e}")
 
-#             return element
-#         except Exception as e:
-#             print(f"Ошибка при ожидании элемента: {e}")
+    def human_like_click(self, browser, element):
+        try:
+            actions = AC(browser)
 
-#             return None
+            actions.move_to_element(element)
+            actions.perform()
+            time.sleep(rd.uniform(0.3, 0.8))
+
+            time.sleep(rd.uniform(0.1, 0.3))
+
+            element.click()
+
+        except Exception as e:
+            print(f"Ошибка при клике: {e}")
+
+            browser.execute_script("arguments[0].click();", element)
+
+    def human_like_hover(self, browser, element):
+        try:
+            actions = AC(browser)
+
+            x_offset = rd.randint(-10, 10)
+            y_offset = rd.randint(-10, 10)
+
+            actions.move_to_element_with_offset(element, x_offset, y_offset)
+            actions.perform()
+
+            time.sleep(rd.uniform(1, 2))
+
+        except Exception as e:
+            print(f"Ошибка при наведении: {e}")
+
+    def human_like_wait(self, base_seconds):
+        variation = rd.uniform(-0.3, 0.3)
+        wait_time = max(0.1, base_seconds + variation)
+        time.sleep(wait_time)
+
+    def human_like_wait_for_element(self, browser, locator, timeout=10):
+        try:
+            # self.human_like_wait(rd.uniform(0.5, 1.5))
+
+            element = WDW(browser, timeout).until(
+                EC.presence_of_element_located(locator)
+            )
+
+            self.human_like_wait(rd.uniform(0.2, 0.8))
+
+            return element
+
+        except Exception as e:
+            print(f"Ошибка при ожидании элемента {locator}: {e}")
+
+            return None
+
+    def random_mouse_movement(self, browser, element=None):
+        try:
+            actions = AC(browser)
+
+            if element:
+                location = element.location_once_scrolled_into_view
+                x = location['x'] + rd.randint(-50, 50)
+                y = location['y'] + rd.randint(-50, 50)
+                actions.move_by_offset(x, y)
+            else:
+                x_offset = rd.randint(-100, 100)
+                y_offset = rd.randint(-100, 100)
+                actions.move_by_offset(x_offset, y_offset)
+
+            actions.perform()
+            time.sleep(rd.uniform(0.2, 0.5))
+
+        except Exception as e:
+            print(f"Ошибка при движении мышью: {e}")
