@@ -211,18 +211,3 @@ class GigaChatAPI:
         except Exception as e:
             print(f"✗ Ошибка подключения к GigaChat: {e}")
             return False
-
-
-# Пример использования
-# if __name__ == "__main__":
-#     AUTH_TOKEN = "токен"
-#     # Создаем API клиент
-#     gigachat = GigaChatAPI(AUTH_TOKEN)
-
-#     # Проверяем подключение
-#     if gigachat.test_connection():
-#         # Тестируем нормализацию
-#         test_name = 'муниципальное автономное общеобразовательное учреждение средняя общеобразовательная школа № 18 с углубленным изучением отдельных предметов города Арма'
-#         result = gigachat.normalize_school_name(test_name)
-#         print(f"\nИсходное: {test_name}")
-#         print(f"Результат: {result}")
