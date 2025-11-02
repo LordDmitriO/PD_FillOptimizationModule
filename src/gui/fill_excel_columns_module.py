@@ -18,7 +18,7 @@ from selenium import webdriver as wd
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait as WDW
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains as AC
 # from webdriver_manager.chrome import ChromeDriverManager as CDM
@@ -197,7 +197,6 @@ class FillExcelColumns(QWidget):
             for word in words:
                 corrected_word = create_correct_spelling(word)
                 corrected_words.append(corrected_word)
-                # time.sleep(10)
             cleaned_text = " ".join(corrected_words)
 
             result_clean_text = cleaned_text
@@ -213,8 +212,6 @@ class FillExcelColumns(QWidget):
         return result
 
     def parse_browser_data(self, our_parse_data):
-        # driver = CDM().install()
-        main_url = "https://www.rusprofile.ru"
         chrome_options = wd.ChromeOptions()
         chrome_options.add_argument("--log-level=3")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -224,6 +221,7 @@ class FillExcelColumns(QWidget):
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--start-maximized")
         chrome_options.add_argument("--incognito")
+        chrome_options.add_argument("--enable-unsafe-swiftshader")
         # chrome_options.add_argument("--headless")
 
         user_agents = [
@@ -245,16 +243,21 @@ class FillExcelColumns(QWidget):
         chrome_options.add_experimental_option("useAutomationExtension", False)
 
         browser = wd.Chrome(options=chrome_options)
-        browser.get(main_url + "/search-advanced")
+        main_url = "https://www.rusprofile.ru"
+        url = "/search-advanced"
+        full_start_url = main_url + url
+
+        time.sleep(rd.uniform(0.1, 0.5))
+
+        browser.get(full_start_url)
         self.humanizer.human_like_wait(2)
-        # url = "/search-advanced"
-        # open_search = browser.find_element(By.XPATH, "//a[@href='/search-advanced']")
         try:
             search = self.humanizer.human_like_wait_for_element(
                 browser, (By.ID, "advanced-search-query"), 10
             )
         except TimeoutException:
             print("Поисковая строка расширенного поиска не найдена!")
+
             browser.quit
 
             return
@@ -282,7 +285,7 @@ class FillExcelColumns(QWidget):
                 # WDW(browser, 5).until(
                 #     EC.staleness_of(search_result)
                 # )
-            except Exception as e:
+            except Exception:
                 pass
 
             try:
@@ -315,27 +318,10 @@ class FillExcelColumns(QWidget):
             self.parse_full_company_name(browser, main_url, all_publications, string_count)
             string_count += 1
             if all_publications:
-                # current_url = browser.current_url
-                try:
-                    back_button = browser.find_element(By.XPATH, "//a[contains(text(),'Назад')] | //button[contains(text(),'Назад')]")
-                    self.humanizer.human_like_click(browser, back_button)
-                except Exception as e:
-                    browser.back()
-                # browser.back()
-                # WDW(browser, 10).until(
-                #     EC.url_changes(current_url)
-                # )
-                # WDW(browser, 10).until(
-                #     EC.element_to_be_clickable((By.ID, "advanced-search-query"))
-                # )
                 self.humanizer.human_like_wait_for_element(
                     browser, (By.ID, "advanced-search-query"), 10
                 )
             else:
-                # print("Ничего не найдено!")
-                # WDW(browser, 10).until(
-                #     EC.element_to_be_clickable((By.ID, "advanced-search-query"))
-                # )
                 self.humanizer.human_like_wait(1)
                 self.humanizer.human_like_wait_for_element(
                     browser, (By.ID, "advanced-search-query"), 10
@@ -344,30 +330,17 @@ class FillExcelColumns(QWidget):
             search = self.humanizer.human_like_wait_for_element(
                 browser, (By.ID, "advanced-search-query"), 5
             )
-            # search = browser.find_elements(By.NAME, "query")[1]
-            # search.send_keys(Keys.ENTER)
-        # time.sleep(2)
+
         browser.quit()
-        # time.sleep(2)
-        # open_search = browser.find_element(By.ID, "indexsearchform")
-        # open_search.click()
-        # time.sleep(2)
-        # search = browser.find_elements(By.NAME, "query")[1]
-        # # browser.execute_script("arguments[0].send_keys('Школа 58');", search)
-        # search.send_keys("Школа 58")
-        # search.send_keys(Keys.ENTER)
 
     def parse_full_company_name(self, browser, main_url, all_publications, string_count):
         organizations_data_arr = []
         company_info = {}
         if all_publications:
-            # for article in all_publications:
+
             article = all_publications[0]
-            # browser.get(main_url + article["href"])
             try:
-                # name = WDW(browser, 10).until(
-                #     EC.presence_of_element_located((By.ID, "clip_name-long"))
-                # )
+
                 link_element = self.humanizer.human_like_wait_for_element(
                     browser, (By.XPATH, f"//a[@href='{article['href']}']"), 5
                 )
@@ -376,25 +349,22 @@ class FillExcelColumns(QWidget):
                 else:
                     browser.get(main_url + article["href"])
             except TimeoutException:
-                # print("Элемент не найден!")
                 browser.get(main_url + article["href"])
 
             self.humanizer.human_like_wait(1.5)
             self.humanizer.human_like_scroll(browser)
 
             try:
-                # address = WDW(browser, 10).until(
-                #     EC.presence_of_element_located((By.ID, "clip_address"))
-                # )
+                self.humanizer.debug_element_search(browser, 'clip_name-long')
                 name = self.humanizer.human_like_wait_for_element(
                     browser, (By.ID, "clip_name-long"), 10
                 )
             except TimeoutException:
-                # print("Элемент не найден!")
                 print("Элемент названия не найден!")
                 name = None
 
             try:
+                self.humanizer.debug_element_search(browser, 'clip_address')
                 address = self.humanizer.human_like_wait_for_element(
                     browser, (By.ID, "clip_address"), 10
                 )
@@ -415,6 +385,7 @@ class FillExcelColumns(QWidget):
             organizations_data_arr.append(company_info)
 
         self.create_complete_data(organizations_data_arr)
+        self.humanizer.close_all_except_first(browser)
 
     def create_complete_data(self, organizations_data_arr):
         morph = MA()
@@ -520,6 +491,10 @@ class Humanization:
             print(f"Ошибка при прокрутке: {e}")
 
     def human_like_click(self, browser, element):
+
+        timeout = 10
+        old_tabs = browser.window_handles
+
         try:
             actions = AC(browser)
 
@@ -527,14 +502,32 @@ class Humanization:
             actions.perform()
             time.sleep(rd.uniform(0.3, 0.8))
 
-            time.sleep(rd.uniform(0.1, 0.3))
-
             element.click()
 
-        except Exception as e:
-            print(f"Ошибка при клике: {e}")
+            WDW(browser, timeout).until(
+                lambda driver: len(driver.window_handles) > len(old_tabs)
+            )
 
-            browser.execute_script("arguments[0].click();", element)
+            new_tab = [tab for tab in browser.window_handles if tab not in old_tabs][0]
+            browser.switch_to.window(new_tab)
+
+            WDW(browser, timeout).until(
+                lambda driver: driver.execute_script("return document.readyState") == "complete"
+            )
+
+        except TimeoutException:
+            print("⚠️ Новая вкладка не открылась, возможно переход на той же странице")
+
+            WDW(browser, timeout).until(
+                lambda driver: driver.execute_script("return document.readyState") == "complete"
+            )
+
+            return True
+
+        except Exception as e:
+            print(f"❌ Ошибка: {e}")
+
+            return False
 
     def human_like_hover(self, browser, element):
         try:
@@ -558,19 +551,35 @@ class Humanization:
 
     def human_like_wait_for_element(self, browser, locator, timeout=10):
         try:
-            # self.human_like_wait(rd.uniform(0.5, 1.5))
+            try:
+                _ = browser.current_url
+            except Exception:
+                print("❌ Браузер закрыт или недоступен!")
+                return None
 
             element = WDW(browser, timeout).until(
-                EC.presence_of_element_located(locator)
+                EC.visibility_of_element_located(locator)
             )
 
             self.human_like_wait(rd.uniform(0.2, 0.8))
-
             return element
 
-        except Exception as e:
-            print(f"Ошибка при ожидании элемента {locator}: {e}")
+        except TimeoutException:
+            print(f"⏱️ Таймаут: элемент {locator} не найден за {timeout} сек")
+            return None
 
+        except WebDriverException as e:
+            print(f"❌ WebDriver ошибка для {locator}: {e.msg}")
+
+            try:
+                browser.current_url
+                print("✅ Браузер еще работает")
+            except Exception:
+                print("❌ Браузер недоступен!")
+            return None
+
+        except Exception as e:
+            print(f"❌ Неожиданная ошибка для {locator}: {type(e).__name__} - {e}")
             return None
 
     def random_mouse_movement(self, browser, element=None):
@@ -592,3 +601,62 @@ class Humanization:
 
         except Exception as e:
             print(f"Ошибка при движении мышью: {e}")
+
+    def debug_element_search(self, browser, element_id):
+        print(f"\n🔍 Диагностика элемента: {element_id}")
+        print(f"📄 URL: {browser.current_url}")
+
+        elements_by_id = browser.find_elements(By.ID, element_id)
+        print(f"✅ Найдено по ID: {len(elements_by_id)}")
+
+        all_ids = browser.execute_script("""
+            return Array.from(document.querySelectorAll('[id]'))
+                .map(el => el.id)
+                .filter(id => id.includes('clip'));
+        """)
+        print(f"📋 ID содержащие 'clip': {all_ids}")
+
+        iframes = browser.find_elements(By.TAG_NAME, "iframe")
+        print(f"🖼️ Найдено iframe: {len(iframes)}")
+
+        ready_state = browser.execute_script("return document.readyState")
+        print(f"📊 Состояние страницы: {ready_state}")
+
+        shadow_check = browser.execute_script(f"""
+            const el = document.getElementById('{element_id}');
+            if (el) return 'Элемент найден!';
+
+            const allElements = document.querySelectorAll('*');
+            for (let el of allElements) {{
+                if (el.shadowRoot) {{
+                    const shadowEl = el.shadowRoot.getElementById('{element_id}');
+                    if (shadowEl) return 'Найден в Shadow DOM';
+                }}
+            }}
+            return 'Не найден';
+        """)
+        print(f"🌓 Shadow DOM: {shadow_check}")
+
+    def close_all_except_first(self, browser):
+        first_handle = browser.window_handles[0]
+
+        while len(browser.window_handles) > 1:
+
+            for handle in browser.window_handles:
+                if handle != first_handle:
+                    browser.switch_to.window(handle)
+                    time.sleep(rd.uniform(0.3, 0.6))
+
+                    try:
+                        actions = AC(handle)
+                        actions.key_down(Keys.CONTROL).send_keys('w').key_up(Keys.CONTROL).perform()
+                        time.sleep(2)
+                    except Exception:
+                        browser.close()
+
+                    time.sleep(rd.uniform(0.5, 1.0))
+                    break
+
+        browser.switch_to.window(first_handle)
+        time.sleep(rd.uniform(0.5, 1.0))
+        print("✅ Осталась только первая вкладка")

@@ -6,3 +6,6 @@ __pycache__/
 
 # Debug files
 .vscode/
+
+# Linter files
+.flake8
