@@ -103,7 +103,6 @@ class ParserThread(QThread):
 
                 result = self.parser.search_organization(org_name)
                 
-                # Заполняем данные для текущей строки
                 self.df.at[row_idx, "Полное название"] = result.get("name", "")
                 self.df.at[row_idx, "Адрес"] = result.get("address", "")
                 self.df.at[row_idx, "Индекс"] = result.get("postal_code", "")
@@ -142,7 +141,6 @@ class ParserThread(QThread):
                     gigachat_attempts_used += 1
                     
                     if gigachat_result["found"]:
-                        # Обновляем данные в DataFrame
                         self.df.at[row_idx, "Полное название"] = gigachat_result.get("name", "")
                         self.df.at[row_idx, "Адрес"] = gigachat_result.get("address", "")
                         self.df.at[row_idx, "Индекс"] = gigachat_result.get("postal_code", "")

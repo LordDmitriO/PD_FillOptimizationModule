@@ -45,7 +45,7 @@ class OrganizationParser:
         """Инициализация браузера Chrome"""
         chrome_options = wd.ChromeOptions()
         chrome_options.add_argument("--window-size=1920,1080")
-        # chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
@@ -98,50 +98,45 @@ class OrganizationParser:
             result["source"] = "Контур Фокус"
             return result
 
-        # 3. ЕГРЮЛ - ищем ИНН
+        # 3. ЕГРЮЛ - ищем ИНН и полные данные
         self.log(f"🔍 Поиск в ЕГРЮЛ...")
         egrul_result = self.search_egrul(org_name)
         if egrul_result["found"]:
             result.update(egrul_result)
             result["source"] = "ЕГРЮЛ"
             return result
-        
+
         # Если в ЕГРЮЛ нашли ИНН (но не полные данные), пробуем повторить поиск по ИНН
         if egrul_result.get("inn"):
-            self.log(f"  🔗 Найден ИНН в ЕГРЮЛ: {egrul_result.get('inn')}, повторный поиск...")
-            
-            # Пробуем RusProfile по ИНН (обычный поиск)
+            self.log(
+                f"  🔗 Найден ИНН в ЕГРЮЛ: {egrul_result.get('inn')}, повторный поиск..."
+            )
+
+            # Пробуем RusProfile по ИНН
             self.log(f"  🔍 Повторный поиск в RusProfile по ИНН...")
             rusprofile_result = self.search_rusprofile(inn=egrul_result.get("inn"))
             if rusprofile_result["found"]:
                 result.update(rusprofile_result)
-                result["source"] = "ЕГРЮЛ → RusProfile (по ИНН)"
+                result["source"] = "ЕГРЮЛ → RusProfile"
                 return result
-            
+
             # Пробуем Контур Фокус по ИНН
             self.log(f"  🔍 Повторный поиск в Контур Фокус по ИНН...")
-            fokus_result = self.search_kontur_fokus(org_name=None, inn=egrul_result.get("inn"))
+            fokus_result = self.search_kontur_fokus(
+                org_name=None, inn=egrul_result.get("inn")
+            )
             if fokus_result["found"]:
                 result.update(fokus_result)
-                result["source"] = "ЕГРЮЛ → Контур Фокус (по ИНН)"
+                result["source"] = "ЕГРЮЛ → Контур Фокус"
                 return result
-            
-            # Если ничего не нашли по ИНН, пробуем GigaChat
-            if self.gigachat_api:
-                self.log(f"  🔄 Не найдено по ИНН, пробуем GigaChat...")
-                gigachat_result = self.search_with_gigachat(org_name)
-                if gigachat_result["found"]:
-                    result.update(gigachat_result)
-                    result["source"] = "ЕГРЮЛ → GigaChat"
-                    return result
-        
-        # 4. GigaChat (если включен и не было ИНН в ЕГРЮЛ)
+
+        # 4. GigaChat - прямой поиск в ЕГРЮЛ через AI (если включен)
         if self.gigachat_api:
-            self.log(f"🤖 Попытка через GigaChat (попыток: {self.gigachat_retries})...")
+            self.log(f"🤖 Поиск через GigaChat (прямой запрос в ЕГРЮЛ)...")
             gigachat_result = self.search_with_gigachat(org_name)
             if gigachat_result["found"]:
                 result.update(gigachat_result)
-                result["source"] = "GigaChat + повторный поиск"
+                result["source"] = "GigaChat (ЕГРЮЛ)"
                 return result
 
         self.log(f"❌ Не найдено нигде")
@@ -155,21 +150,20 @@ class OrganizationParser:
             main_url = "https://www.rusprofile.ru"
 
             if inn:
-                # Поиск по ИНН - может сразу открыть страницу организации
+                # Поиск по ИНН
                 self.browser.get(f"{main_url}/search?query={inn}")
                 self.humanizer.human_like_wait(rd.uniform(1.5, 2.5))
-                
-                # Проверяем, не открылась ли сразу страница организации
+
+                # Проверяем, открылась ли сразу страница организации
                 try:
                     name_elem = self.humanizer.human_like_wait_for_element(
                         self.browser, (By.ID, "clip_name-long"), 3
                     )
                     if name_elem:
-                        # Страница организации открылась сразу, пропускаем поиск в списке
                         self.log("  ✓ Организация найдена сразу по ИНН")
                         self.humanizer.human_like_scroll(self.browser)
                     else:
-                        # Это список результатов, нужно перейти на первую организацию
+                        # Список результатов
                         try:
                             search_result = self.humanizer.human_like_wait_for_element(
                                 self.browser, (By.CLASS_NAME, "list-element__title"), 5
@@ -177,16 +171,20 @@ class OrganizationParser:
                             if search_result:
                                 self.humanizer.human_like_scroll(self.browser)
                                 soup = BS(self.browser.page_source, "lxml")
-                                publications = soup.find_all("a", {"class": "list-element__title"})
-                                
+                                publications = soup.find_all(
+                                    "a", {"class": "list-element__title"}
+                                )
+
                                 if publications:
-                                    self.log(f"  ✓ Найдено результатов: {len(publications)}")
+                                    self.log(
+                                        f"  ✓ Найдено результатов: {len(publications)}"
+                                    )
                                     link = publications[0]["href"]
                                     self.browser.get(main_url + link)
                                     self.humanizer.human_like_wait(rd.uniform(1.0, 2.0))
                                     self.humanizer.human_like_scroll(self.browser)
                                 else:
-                                    self.log("  ⚠️ Пустой список публикаций")
+                                    self.log("  ⚠️ Пустой список")
                                     return result
                             else:
                                 self.log("  ⚠️ Нет результатов")
@@ -195,7 +193,7 @@ class OrganizationParser:
                             self.log("  ⚠️ Нет результатов")
                             return result
                 except TimeoutException:
-                    # Проверяем, есть ли список результатов
+                    # Проверяем список результатов
                     try:
                         search_result = self.humanizer.human_like_wait_for_element(
                             self.browser, (By.CLASS_NAME, "list-element__title"), 5
@@ -203,16 +201,20 @@ class OrganizationParser:
                         if search_result:
                             self.humanizer.human_like_scroll(self.browser)
                             soup = BS(self.browser.page_source, "lxml")
-                            publications = soup.find_all("a", {"class": "list-element__title"})
-                            
+                            publications = soup.find_all(
+                                "a", {"class": "list-element__title"}
+                            )
+
                             if publications:
-                                self.log(f"  ✓ Найдено результатов: {len(publications)}")
+                                self.log(
+                                    f"  ✓ Найдено результатов: {len(publications)}"
+                                )
                                 link = publications[0]["href"]
                                 self.browser.get(main_url + link)
                                 self.humanizer.human_like_wait(rd.uniform(1.0, 2.0))
                                 self.humanizer.human_like_scroll(self.browser)
                             else:
-                                self.log("  ⚠️ Пустой список публикаций")
+                                self.log("  ⚠️ Пустой список")
                                 return result
                         else:
                             self.log("  ⚠️ Нет результатов")
@@ -232,7 +234,7 @@ class OrganizationParser:
                     if not search:
                         self.log("  ⚠️ Не загрузился поиск")
                         return result
-                    
+
                     self.humanizer.human_like_type(self.browser, search, org_name)
                     self.humanizer.random_mouse_movement(self.browser, search)
                     search.send_keys(Keys.ENTER)
@@ -258,7 +260,7 @@ class OrganizationParser:
                 publications = soup.find_all("a", {"class": "list-element__title"})
 
                 if not publications:
-                    self.log("  ⚠️ Пустой список публикаций")
+                    self.log("  ⚠️ Пустой список")
                     return result
 
                 self.log(f"  ✓ Найдено результатов: {len(publications)}")
@@ -323,20 +325,17 @@ class OrganizationParser:
         result = {"found": False}
 
         try:
-            # Если передан ИНН, используем его для поиска
             query = inn if inn else org_name
             if not query:
                 return result
-                
+
             url = f"https://focus.kontur.ru/search?country=RU&query={query}"
             self.browser.get(url)
             self.humanizer.human_like_wait(rd.uniform(0.5, 1.0))
 
             try:
                 self.humanizer.human_like_wait_for_element(
-                    self.browser, 
-                    (By.XPATH, "//*[contains(text(), 'ИНН')]"), 
-                    5
+                    self.browser, (By.XPATH, "//*[contains(text(), 'ИНН')]"), 5
                 )
                 self.humanizer.human_like_wait(rd.uniform(1, 2))
                 self.humanizer.human_like_scroll(self.browser)
@@ -398,7 +397,7 @@ class OrganizationParser:
         return result
 
     def search_egrul(self, org_name):
-        """Поиск в ЕГРЮЛ (БЕЗ автоперехода в RusProfile)"""
+        """Поиск в ЕГРЮЛ"""
         result = {"found": False}
 
         try:
@@ -459,7 +458,7 @@ class OrganizationParser:
                 except:
                     pass
 
-                # Если есть полные данные (название и адрес), считаем что найдено
+                # Если есть полные данные
                 if result.get("name") and result.get("address"):
                     result["found"] = True
                     self.log(
@@ -467,15 +466,15 @@ class OrganizationParser:
                     )
                     self.log(f"  📝 {result['name'][:70]}...")
                     self.log(f"  📍 {result['address'][:70]}...")
-                # Если есть только ИНН/ОГРН, но нет полных данных - не помечаем как found
+                # Если есть только ИНН - не помечаем как found
                 elif result.get("inn") or result.get("ogrn"):
-                    result["found"] = False  # Помечаем как не найден полностью, но ИНН есть
+                    result["found"] = False
                     self.log(
-                        f"  ⚠️ Найден только ИНН: {result.get('inn')}, ОГРН: {result.get('ogrn')} (без полных данных)"
+                        f"  ⚠️ Найден только ИНН: {result.get('inn')} (без полных данных)"
                     )
 
             except TimeoutException:
-                self.log("  ⏱️ Время ожидания истекло")
+                self.log("  ⏱️ Timeout")
 
         except Exception as e:
             self.log(f"  ⚠️ Ошибка: {str(e)}")
@@ -483,35 +482,17 @@ class OrganizationParser:
         return result
 
     def search_with_gigachat(self, org_name):
-        """Нормализация через GigaChat и повторный поиск (одна попытка)"""
+        """Прямой поиск в ЕГРЮЛ через GigaChat"""
         result = {"found": False}
 
         try:
-            normalized_name = self.gigachat_api.normalize_school_name(org_name)
+            gigachat_result = self.gigachat_api.search_organization_in_egrul(org_name)
 
-            if normalized_name and normalized_name != "Ошибка":
-                self.log(f"  📝 Нормализовано: {normalized_name[:70]}...")
-                self.log(f"  🔄 Повторный поиск...")
-
-                # RusProfile с нормализованным названием
-                rus_result = self.search_rusprofile(normalized_name)
-                if rus_result["found"]:
-                    result.update(rus_result)
-                    result["found"] = True
-                    result["source"] = "GigaChat → RusProfile"
-                    self.log(f"  ✅ Найдено после нормализации!")
-                    return result
-
-                # Контур Фокус
-                fokus_result = self.search_kontur_fokus(normalized_name)
-                if fokus_result["found"]:
-                    result.update(fokus_result)
-                    result["found"] = True
-                    result["source"] = "GigaChat → Контур Фокус"
-                    self.log(f"  ✅ Найдено после нормализации!")
-                    return result
+            if gigachat_result["found"]:
+                result.update(gigachat_result)
+                return result
             else:
-                self.log(f"  ⚠️ Ошибка нормализации")
+                self.log(f"  ⚠️ GigaChat не нашел организацию")
 
         except Exception as e:
             self.log(f"  ⚠️ Ошибка GigaChat: {str(e)}")
