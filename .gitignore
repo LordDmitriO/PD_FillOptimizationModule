@@ -1,0 +1,19 @@
+# IDE
+.idea/
+
+# Virtual envs
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+
+# Local environment variables
+.env
+
+# Large runtime/session data
+selenium_session/
+
