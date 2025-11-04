@@ -1,3 +1,9 @@
+# OS files
+.DS_Store
+
+# IDE
+.idea/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 selenium_session/
@@ -11,9 +17,3 @@ selenium_session/
 
 # Linter files
 .flake8
-
-# IDE
-.idea/
-
-# OS files
-.DS_Store
