@@ -1,7 +1,9 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
+selenium_session/
 
 # Environments
+.env
 .venv
 
 # Debug files
@@ -9,3 +11,9 @@ __pycache__/
 
 # Linter files
 .flake8
+
+# IDE
+.idea/
+
+# OS files
+.DS_Store
