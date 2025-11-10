@@ -1,662 +1,488 @@
 """
+Главный модуль для парсинга организаций из Excel
 """
 
-import re
-import time
-import string
-import random as rd
 import pandas as pd
-import threading
-import language_tool_python
-from queue import Queue
-from pymorphy3 import MorphAnalyzer as MA
-
-# from gensim.models import Word2Vec
-# from gensim.utils import simple_preprocess
-
-from selenium import webdriver as wd
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait as WDW
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains as AC
-# from webdriver_manager.chrome import ChromeDriverManager as CDM
-from bs4 import BeautifulSoup as BS
-
+import os
+from dotenv import load_dotenv
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QFileDialog,
+    QMessageBox,
+    QProgressBar,
+    QTextEdit,
+    QCheckBox,
+    QSpinBox,
 )
-from PySide6.QtCore import Qt  # QMimeData
-# from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPalette
+from PySide6.QtCore import Qt, QThread, Signal, QFile, QTextStream
+
+from .text_processor_upd import TextProcessor
+from .parser_core import OrganizationParser
+
+# Импортируем GigaChat API
+try:
+    from .gigachat_api import GigaChatAPI
+
+    GIGACHAT_AVAILABLE = True
+except ImportError:
+    GIGACHAT_AVAILABLE = False
+    print("⚠️ Модуль gigachat_api.py не найден")
+
+# Загружаем переменные окружения
+load_dotenv()
+
+
+class ParserThread(QThread):
+    """Отдельный поток для парсинга"""
+
+    progress = Signal(int, int)
+    log_message = Signal(str)
+    finished = Signal(pd.DataFrame)
+
+    def __init__(self, data, df, use_gigachat=False, gigachat_retries=3):
+        super().__init__()
+        self.data = data
+        self.df = df
+        self.use_gigachat = use_gigachat
+        self.gigachat_retries = gigachat_retries
+        self.gigachat_api = None
+        self.parser = None
+
+        # Инициализируем GigaChat если нужно
+        if self.use_gigachat and GIGACHAT_AVAILABLE:
+            auth_token = os.getenv("GIGACHAT_AUTH_TOKEN")
+            if auth_token:
+                try:
+                    self.gigachat_api = GigaChatAPI(auth_token)
+                    if self.gigachat_api.test_connection():
+                        self.log_message.emit("✅ GigaChat подключен")
+                    else:
+                        self.gigachat_api = None
+                except Exception as e:
+                    self.log_message.emit(f"⚠️ Ошибка GigaChat: {e}")
+                    self.gigachat_api = None
+            else:
+                self.log_message.emit("⚠️ GIGACHAT_AUTH_TOKEN не найден в .env")
+
+    def run(self):
+        try:
+            # Инициализируем парсер БЕЗ GigaChat для основного поиска
+            self.parser = OrganizationParser(
+                log_callback=self.emit_log,
+                use_gigachat=False,  # Сначала без GigaChat
+                gigachat_api=None,
+                gigachat_retries=0,
+            )
+
+            self.parser.init_browser()
+
+            # Инициализируем колонки пустыми значениями
+            self.df["Полное название"] = ""
+            self.df["Адрес"] = ""
+            self.df["Индекс"] = ""
+            self.df["ИНН"] = ""
+            self.df["ОГРН"] = ""
+            self.df["Источник"] = ""
+
+            # Получаем индексы строк, для которых есть данные
+            data_indices = self.df.index[:len(self.data)].tolist()
+
+            # Список ненайденных организаций для обработки через GigaChat
+            not_found_items = []
+
+            # Основной цикл поиска (без GigaChat)
+            for idx, (row_idx, org_name) in enumerate(zip(data_indices, self.data), 1):
+                self.progress.emit(idx, len(self.data))
+                self.log_message.emit(f"\n{'='*60}")
+                self.log_message.emit(f"📋 [{idx}/{len(self.data)}] {org_name}")
+
+                result = self.parser.search_organization(org_name)
+
+                self.df.at[row_idx, "Полное название"] = result.get("name", "")
+                self.df.at[row_idx, "Адрес"] = result.get("address", "")
+                self.df.at[row_idx, "Индекс"] = result.get("postal_code", "")
+                self.df.at[row_idx, "ИНН"] = result.get("inn", "")
+                self.df.at[row_idx, "ОГРН"] = result.get("ogrn", "")
+                self.df.at[row_idx, "Источник"] = result.get("source", "Не найдено")
+
+                # Сохраняем ненайденные для обработки через GigaChat
+                if result.get("source") == "Не найдено":
+                    not_found_items.append((row_idx, org_name))
+
+            # Если включен GigaChat и есть ненайденные организации
+            if self.use_gigachat and self.gigachat_api and not_found_items:
+                self.log_message.emit(f"\n{'='*60}")
+                self.log_message.emit(f"🤖 GigaChat: обработка {len(not_found_items)} ненайденных организаций")
+                self.log_message.emit(f"📊 Всего попыток: {self.gigachat_retries} (на все организации)")
+                self.log_message.emit(f"{'='*60}")
+
+                # Подключаем GigaChat к парсеру
+                self.parser.gigachat_api = self.gigachat_api
+                self.parser.use_gigachat = True
+
+                # Обрабатываем ненайденные через GigaChat с ограничением попыток на все организации
+                items_to_process = not_found_items.copy()
+                gigachat_attempts_used = 0
+                found_count = 0
+
+                for row_idx, org_name in items_to_process:
+                    if gigachat_attempts_used >= self.gigachat_retries:
+                        self.log_message.emit(f"\n⚠️ Достигнут лимит попыток GigaChat ({self.gigachat_retries})")
+                        self.log_message.emit(f"📊 Найдено через GigaChat: {found_count} из {len(not_found_items)}")
+                        break
+
+                    self.log_message.emit(f"\n  📋 [{gigachat_attempts_used + 1}/{self.gigachat_retries}] {org_name}")
+                    gigachat_result = self.parser.search_with_gigachat(org_name)
+                    gigachat_attempts_used += 1
+
+                    if gigachat_result["found"]:
+                        self.df.at[row_idx, "Полное название"] = gigachat_result.get("name", "")
+                        self.df.at[row_idx, "Адрес"] = gigachat_result.get("address", "")
+                        self.df.at[row_idx, "Индекс"] = gigachat_result.get("postal_code", "")
+                        self.df.at[row_idx, "ИНН"] = gigachat_result.get("inn", "")
+                        self.df.at[row_idx, "ОГРН"] = gigachat_result.get("ogrn", "")
+                        source = gigachat_result.get("source", "GigaChat")
+                        if not source or source == "Не найдено":
+                            source = "GigaChat"
+                        self.df.at[row_idx, "Источник"] = source
+                        found_count += 1
+                        self.log_message.emit("  ✅ Найдено через GigaChat!")
+
+                if gigachat_attempts_used < self.gigachat_retries:
+                    self.log_message.emit(f"\n📊 Найдено через GigaChat: {found_count} из {len(not_found_items)}")
+                else:
+                    self.log_message.emit(f"\n📊 Обработано через GigaChat: {found_count} из {len(not_found_items)} (лимит попыток достигнут)")
+
+            self.finished.emit(self.df)
+
+        except Exception as e:
+            self.log_message.emit(f"❌ КРИТИЧЕСКАЯ ОШИБКА: {str(e)}")
+
+        finally:
+            if self.parser:
+                self.parser.close_browser()
+
+    def emit_log(self, message):
+        """Передача сообщения в главный поток"""
+        self.log_message.emit(message)
 
 
 class FillExcelColumns(QWidget):
+    """Главное окно приложения"""
+
     def __init__(self):
         super().__init__()
+        self.df = None
+        self.parser_thread = None
+        self.text_processor = None
+        self.file_loaded = False
 
-        self.humanizer = Humanization()
-        self.setWindowTitle("Drag and Drop Files")
-        self.setGeometry(100, 100, 400, 300)
+        self.setWindowTitle("Парсер организаций")
+        self.setGeometry(100, 100, 900, 750)
+
+        # Загружаем стили из файла
+        self.load_stylesheet()
 
         self.widget_ui()
 
+    def load_stylesheet(self):
+        """Загрузка стилей из файла styles.qss"""
+        try:
+            # Пытаемся загрузить из той же директории, что и модуль
+            style_path = os.path.join(os.path.dirname(__file__), "styles.qss")
+
+            if not os.path.exists(style_path):
+                # Если не найден, пробуем относительный путь
+                style_path = "styles.qss"
+
+            style_file = QFile(style_path)
+            if style_file.open(QFile.OpenModeFlag.ReadOnly | QFile.OpenModeFlag.Text):
+                stream = QTextStream(style_file)
+                stylesheet = stream.readAll()
+                self.setStyleSheet(stylesheet)
+                style_file.close()
+            else:
+                print(f"⚠️ Не удалось открыть файл стилей: {style_path}")
+        except Exception as e:
+            print(f"⚠️ Ошибка загрузки стилей: {e}")
+
     def widget_ui(self):
+        """Инициализация интерфейса"""
         main_layout = QVBoxLayout()
 
-        self.label = QLabel("Drag and drop files here \n or \n", alignment=Qt.AlignmentFlag.AlignCenter)
-        self.label.setStyleSheet("border: 2px dashed gray; padding: 20px;")
+        # Зона для перетаскивания файлов
+        self.label = QLabel(
+            "📁 Перетащите Excel файл сюда\nили", alignment=Qt.AlignmentFlag.AlignCenter
+        )
+        self.label.setObjectName("dropZoneLabel")
         self.label.setAcceptDrops(True)
         self.label.dragEnterEvent = self.drag_enter_event
         self.label.dropEvent = self.drop_event
 
-        browse_file_button = QPushButton("Browse file")
+        # Кнопка выбора файла
+        browse_file_button = QPushButton("📂 Выбрать файл")
         browse_file_button.clicked.connect(self.browse_file)
+        browse_file_button.setObjectName("browseFileButton")
+        browse_file_button.setCursor(Qt.CursorShape.PointingHandCursor)
 
+        # Кнопка запуска парсинга
+        self.start_parse_button = QPushButton("🚀 Начать парсинг")
+        self.start_parse_button.clicked.connect(self.start_parsing_clicked)
+        self.start_parse_button.setObjectName("startParseButton")
+        self.start_parse_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.start_parse_button.setEnabled(False)  # Неактивна до загрузки файла
+
+        # Настройки GigaChat
+        gigachat_layout = QHBoxLayout()
+        self.gigachat_checkbox = QCheckBox("🤖 Использовать GigaChat")
+        self.gigachat_checkbox.setChecked(False)
+        self.gigachat_checkbox.setObjectName("gigachatCheckbox")
+        self.gigachat_checkbox.setEnabled(False)  # Неактивна до загрузки файла
+
+        gigachat_layout.addWidget(self.gigachat_checkbox)
+        gigachat_layout.addWidget(QLabel("Попыток (на все ненайденные):"))
+
+        self.gigachat_retries = QSpinBox()
+        self.gigachat_retries.setMinimum(1)
+        self.gigachat_retries.setMaximum(5)
+        self.gigachat_retries.setValue(3)
+        self.gigachat_retries.setObjectName("gigachatRetries")
+        self.gigachat_retries.setEnabled(False)  # Неактивен до загрузки файла
+        gigachat_layout.addWidget(self.gigachat_retries)
+        gigachat_layout.addStretch()
+
+        # Прогресс бар
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        # self.progress_bar.setStyleSheet(
+        #     """
+        #     QProgressBar {
+        #         border: 2px solid #2196F3;
+        #         border-radius: 5px;
+        #         text-align: center;
+        #         height: 25px;
+        #     }
+        #     QProgressBar::chunk {
+        #         background-color: #4CAF50;
+        #     }
+        # """
+        # )
+
+        # Лог
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setObjectName("logText")
+
+        # Информация
+        info_label = QLabel(
+            "⚡ Приоритет: RusProfile → Контур Фокус → ЕГРЮЛ → GigaChat"
+        )
+        info_label.setObjectName("infoLabel")
+
+        # Сборка интерфейса
         main_layout.addWidget(self.label)
         main_layout.addWidget(browse_file_button)
+        main_layout.addWidget(self.start_parse_button)
+        main_layout.addLayout(gigachat_layout)
+        main_layout.addWidget(info_label)
+        main_layout.addWidget(self.progress_bar)
+        main_layout.addWidget(QLabel("📊 Лог обработки:"))
+        main_layout.addWidget(self.log_text)
 
         self.setLayout(main_layout)
 
     def drag_enter_event(self, event):
+        """Обработка начала перетаскивания"""
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def drop_event(self, event):
-        start_time = time.time()
+        """Обработка завершения перетаскивания"""
         for url in event.mimeData().urls():
             file_path = url.toLocalFile()
             if not self.check_file_extensions(file_path):
                 QMessageBox.warning(self, "Ошибка", "Неподдерживаемый тип файла!")
             else:
-                self.read_excel_file(file_path)
-                print(f"File dropped: {file_path}")
-
-                end_time = time.time()
-                result_time = round(end_time - start_time, 2)
-                print(f'Время выполнения программы заняло: {result_time} с')
+                self.process_file(file_path)
 
     def browse_file(self):
-        start_time = time.time()
-        file_paths, _ = QFileDialog.getOpenFileNames(self, "Select files", "", "Excel-files (*.xlsx; *.xls)")
-        for file_path in file_paths:
-            print(f"File selected: {file_path}")
-            self.read_excel_file(file_path)
-
-            end_time = time.time()
-            result_time = round(end_time - start_time, 2)
-            print(f'Время выполнения программы заняло: {result_time} с')
+        """Выбор файла через диалог"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите файл", "", "Excel-файлы (*.xlsx *.xls)"
+        )
+        if file_path:
+            self.process_file(file_path)
 
     def check_file_extensions(self, file_path):
-        return file_path.endswith(('.xlsx', '.xls'))
+        """Проверка расширения файла"""
+        return file_path.endswith((".xlsx", ".xls"))
 
-    def read_excel_file(self, file_path):
+    def process_file(self, file_path):
+        """Загрузка выбранного файла"""
         try:
             self.df = pd.read_excel(file_path)
-            self.parse_excel_data()
+            self.file_loaded = True
+            self.add_log(f"✅ Файл загружен: {file_path}")
+            self.add_log(f"📊 Строк в файле: {len(self.df)}")
+            # Активируем кнопку запуска и настройки
+            self.start_parse_button.setEnabled(True)
+            self.gigachat_checkbox.setEnabled(True)
+            self.gigachat_retries.setEnabled(True)
         except Exception as e:
-            QMessageBox.warning(self, "Ошибка", f'Не удалось обработать файл: {str(e)}')
+            QMessageBox.warning(self, "Ошибка", f"Не удалось загрузить файл: {str(e)}")
+            self.file_loaded = False
+            self.start_parse_button.setEnabled(False)
 
     def parse_excel_data(self):
+        # """Парсинг данных из Excel"""
+        # raw_data_column = self.get_raw_data_from_column()
+
+        # # Создаем процессор текста с callback для логов
+        # self.text_processor = TextProcessor(log_callback=self.add_log)
+
+        # self.add_log("\n🔧 ЭТАП 1: Нормализация названий")
+        # self.add_log("=" * 60)
+
+        # convert_time_start = time.time()
+        # processed_data_column = self.text_processor.convert_names_for_parse(
+        #     raw_data_column
+        # )
+        # convert_time_end = time.time()
+        # convert_time_result = round(convert_time_end - convert_time_start, 2)
+
+        # self.add_log(f"\n⏱ Нормализация заняла: {convert_time_result} с")
+        # self.add_log("\n🌐 ЭТАП 2: Поиск в базах данных")
+        # self.add_log("=" * 60)
+
+        # self.start_parsing(processed_data_column)
+
+        """Парсинг данных из Excel"""
         raw_data_column = self.get_raw_data_from_column()
 
-        convert_time_start = time.time()
-        processed_data_column = self.convert_names_for_parse(raw_data_column)
-        convert_time_end = time.time()
-        convert_time_result = round(convert_time_end - convert_time_start, 2)
+        self.add_log("\n🔧 ЭТАП 1: Нормализация названий")
+        self.add_log("=" * 60)
 
-        print(f'Преобразование слов заняло: {convert_time_result} с')
+        # Создаем и запускаем worker
+        self.worker = TextProcessor(raw_data_column)
 
-        self.parse_browser_data(processed_data_column)
+        # Подключаем сигналы
+        self.worker.log_signal.connect(self.add_log)
+        self.worker.progress_signal.connect(self.update_progress)
+        self.worker.finished_signal.connect(self.start_parsing)
+        # self.worker.error_signal.connect(self.on_processing_error)
+
+        # Запоминаем время начала
+        # convert_time_start = time.time()
+        # Запускаем обработку
+        self.worker.start()
 
     def get_raw_data_from_column(self):
+        """Получение данных из столбца Excel"""
         try:
-            data = []
             column_index = self.df.columns.get_loc("Образовательное учреждение из 1С")
             column_data = self.df.iloc[0:, column_index].dropna()
-            data = column_data.tolist()
-
-            return data
+            return column_data.tolist()
         except Exception as e:
-            QMessageBox.warning(self, "Ошибка", f'Не удалось получить данные из файла: {str(e)}')
-
-    def convert_names_for_parse(self, raw_data_column):
-        tool = language_tool_python.LanguageTool('ru')
-
-        def create_correct_spelling(word):
-            result_queue = Queue()
-
-            def check_word():
-                try:
-                    matches = tool.check(word)
-                    if matches:
-                        corrected_word = tool.correct(word)
-                    else:
-                        corrected_word = word
-                    result_queue.put(corrected_word)
-                except Exception as e:
-                    result_queue.put((word, f'Ошибки: {str(e)}'))
-
-            thread = threading.Thread(target=check_word)
-            thread.start()
-
-            thread.join(timeout=10.0)
-
-            if thread.is_alive():
-                print(f'Превышено время проверки для слова: {word}')
-                thread.join()
-                return word
-            else:
-                print(f'Успешно прошло проверку слово: {word}')
-
-            result_correct_word = result_queue.get()
-            if isinstance(result_correct_word, tuple):
-                print(f'Описание ошибки: {result_correct_word[1]}')
-                result_correct_word = result_correct_word[0]
-
-            return result_correct_word
-
-        def remove_geo_mentions(text):
-            # result_correct_text = re.sub(r'\b(г\.?|город|село|округ|г.\.?|пос\.?|д\.?|станица|хутор|район|область|край|республика)\s+\w+', '', text, flags=re.IGNORECASE)
-            result_correct_text = re.sub(r'(.*)".*$', r'\1"', text)
-
-            return result_correct_text
-
-        def clean_text(text):
-
-            quoted_parts = re.findall(r'"(.*?)"', text)
-
-            temp_text = text
-
-            for part in quoted_parts:
-                temp_text = re.sub(rf'"{re.escape(part)}"', '', temp_text)
-
-            words = temp_text.split()
-            corrected_words = []
-
-            for word in words:
-                if word.isupper():
-                    corrected_words.append(word)
-                else:
-                    corrected_words.append(word.lower())
-
-            cleaned_text = ' '.join(corrected_words).strip()
-            if cleaned_text:
-                cleaned_text = cleaned_text[0].upper() + cleaned_text[1:]
-
-            for part in quoted_parts:
-                insert_pos = text.find(f'"{part}"')
-                if insert_pos != -1:
-                    cleaned_text = cleaned_text[:insert_pos] + f'"{part}"' + cleaned_text[insert_pos:]
-            intermediate_result = cleaned_text
-
-            words = intermediate_result.split()
-            corrected_words = []
-            for word in words:
-                corrected_word = create_correct_spelling(word)
-                corrected_words.append(corrected_word)
-            cleaned_text = " ".join(corrected_words)
-
-            result_clean_text = cleaned_text
-
-            return result_clean_text
-
-        result = []
-        for company_name in raw_data_column:
-            company_name = remove_geo_mentions(company_name)
-            company_name = clean_text(company_name)
-            result.append(company_name)
-
-        return result
-
-    def parse_browser_data(self, our_parse_data):
-        chrome_options = wd.ChromeOptions()
-        chrome_options.add_argument("--log-level=3")
-        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--start-maximized")
-        chrome_options.add_argument("--incognito")
-        chrome_options.add_argument("--enable-unsafe-swiftshader")
-        # chrome_options.add_argument("--headless")
-
-        user_agents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.2420.81",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 OPR/109.0.0.0",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.4; rv:124.0) Gecko/20100101 Firefox/124.0",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 OPR/109.0.0.0",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (X11; Linux i686; rv:124.0) Gecko/20100101 Firefox/124.0"
-        ]
-        selected_user_agent = rd.choice(user_agents)
-        chrome_options.add_argument(f'--user-agent={selected_user_agent}')
-
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option("useAutomationExtension", False)
-
-        browser = wd.Chrome(options=chrome_options)
-        main_url = "https://www.rusprofile.ru"
-        url = "/search-advanced"
-        full_start_url = main_url + url
-
-        time.sleep(rd.uniform(0.1, 0.5))
-
-        browser.get(full_start_url)
-        self.humanizer.human_like_wait(2)
-        try:
-            search = self.humanizer.human_like_wait_for_element(
-                browser, (By.ID, "advanced-search-query"), 10
+            QMessageBox.warning(
+                self, "Ошибка", f"Не удалось получить данные из файла: {str(e)}"
             )
-        except TimeoutException:
-            print("Поисковая строка расширенного поиска не найдена!")
+            return []
 
-            browser.quit
-
+    def start_parsing_clicked(self):
+        """Обработка нажатия кнопки запуска парсинга"""
+        if not self.file_loaded or self.df is None:
+            QMessageBox.warning(self, "Ошибка", "Сначала загрузите файл!")
             return
 
-        string_count = 2
+        # Блокируем кнопки на время парсинга
+        self.start_parse_button.setEnabled(False)
+        self.gigachat_checkbox.setEnabled(False)
+        self.gigachat_retries.setEnabled(False)
 
-        for data_element in our_parse_data:
-            # search.send_keys(Keys.CONTROL + 'a')
-            # search.send_keys(Keys.DELETE)
+        self.parse_excel_data()
 
-            # search.send_keys(data_element)
+    def start_parsing(self, data):
+        """Запуск парсинга в отдельном потоке"""
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setMaximum(len(data))
+        self.progress_bar.setValue(0)
 
-            self.humanizer.human_like_type(browser, search, data_element)
-            self.humanizer.random_mouse_movement(browser, search)
+        use_gigachat = self.gigachat_checkbox.isChecked()
+        retries = self.gigachat_retries.value()
 
-            search.send_keys(Keys.ENTER)
-            self.humanizer.human_like_wait(1.5)
+        self.parser_thread = ParserThread(data, self.df.copy(), use_gigachat, retries)
+        self.parser_thread.progress.connect(self.update_progress)
+        self.parser_thread.log_message.connect(self.add_log)
+        self.parser_thread.finished.connect(self.parsing_finished)
+        self.parser_thread.start()
 
+    def update_progress(self, current, total=None):
+        """Обновление прогресс бара"""
+        self.progress_bar.setValue(current)
+
+    def add_log(self, message):
+        """Добавление сообщения в лог"""
+        self.log_text.append(message)
+        self.log_text.verticalScrollBar().setValue(
+            self.log_text.verticalScrollBar().maximum()
+        )
+
+    def parsing_finished(self, result_df):
+        """Завершение парсинга"""
+        self.df = result_df
+        self.add_log("\n" + "=" * 60)
+        self.add_log("🎉 Парсинг завершен!")
+
+        found = self.df[self.df["Источник"] != "Не найдено"].shape[0]
+        total = self.df.shape[0]
+        self.add_log(f"📊 Найдено: {found}/{total} ({round(found/total*100, 1)}%)")
+
+        sources = self.df["Источник"].value_counts()
+        self.add_log("\n📈 Статистика по источникам:")
+        for source, count in sources.items():
+            self.add_log(f"  • {source}: {count}")
+
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, "Сохранить результат", "", "Excel-файлы (*.xlsx)"
+        )
+
+        if save_path:
             try:
-                search_result = self.humanizer.human_like_wait_for_element(
-                    browser, (By.CLASS_NAME, "list-element__title"), 5
+                self.df.to_excel(save_path, index=False)
+                QMessageBox.information(
+                    self,
+                    "✅ Успех",
+                    f"Результаты сохранены!\n\n📊 Найдено: {found}/{total}\n📁 {save_path}",
                 )
-                if search_result:
-                    self.humanizer.human_like_wait(rd.uniform(0.5, 1.0))
-                # WDW(browser, 5).until(
-                #     EC.staleness_of(search_result)
-                # )
-            except Exception:
-                pass
-
-            try:
-                # WDW(browser, 5).until(
-                #     EC.presence_of_element_located((By.CLASS_NAME, "list-element__title"))
-                # )
-                self.humanizer.human_like_wait_for_element(
-                    browser, (By.CLASS_NAME, "list-element__title"), 5
-                )
-                self.humanizer.human_like_scroll(browser)
-
-                soup = BS(browser.page_source, "lxml")
-                all_publications = soup.find_all("a", {"class": "list-element__title"})
-
-            except TimeoutException:
-                print(f'Ошибка при поиске {data_element}: превышено время ожидания')
-                all_publications = None
-                try:
-                    # WDW(browser, 5).until(
-                    #     EC.element_to_be_clickable((By.ID, "advanced-search-query"))
-                    # )
-                    self.humanizer.human_like_wait_for_element(
-                        browser, (By.ID, "advanced-search-query"), 5
-                    )
-                except TimeoutException:
-                    print("Поле поиска недоступно, выполнение программы прервано!")
-                    break
-
-            print(data_element)
-            self.parse_full_company_name(browser, main_url, all_publications, string_count)
-            string_count += 1
-            if all_publications:
-                self.humanizer.human_like_wait_for_element(
-                    browser, (By.ID, "advanced-search-query"), 10
-                )
-            else:
-                self.humanizer.human_like_wait(1)
-                self.humanizer.human_like_wait_for_element(
-                    browser, (By.ID, "advanced-search-query"), 10
+                self.add_log(f"✅ Файл сохранен: {save_path}")
+            except Exception as e:
+                QMessageBox.warning(
+                    self, "Ошибка", f"Не удалось сохранить файл: {str(e)}"
                 )
 
-            search = self.humanizer.human_like_wait_for_element(
-                browser, (By.ID, "advanced-search-query"), 5
-            )
+        self.progress_bar.setVisible(False)
 
-        browser.quit()
+        # Разблокируем кнопки после завершения
+        self.start_parse_button.setEnabled(True)
+        self.gigachat_checkbox.setEnabled(True)
+        self.gigachat_retries.setEnabled(True)
 
-    def parse_full_company_name(self, browser, main_url, all_publications, string_count):
-        organizations_data_arr = []
-        company_info = {}
-        if all_publications:
+        # Закрываем процессор текста
+        if self.text_processor:
+            self.text_processor.close()
 
-            article = all_publications[0]
-            try:
 
-                link_element = self.humanizer.human_like_wait_for_element(
-                    browser, (By.XPATH, f"//a[@href='{article['href']}']"), 5
-                )
-                if link_element:
-                    self.humanizer.human_like_click(browser, link_element)
-                else:
-                    browser.get(main_url + article["href"])
-            except TimeoutException:
-                browser.get(main_url + article["href"])
+if __name__ == "__main__":
+    from PySide6.QtWidgets import QApplication
+    import sys
 
-            self.humanizer.human_like_wait(1.5)
-            self.humanizer.human_like_scroll(browser)
-
-            try:
-                self.humanizer.debug_element_search(browser, 'clip_name-long')
-                name = self.humanizer.human_like_wait_for_element(
-                    browser, (By.ID, "clip_name-long"), 10
-                )
-            except TimeoutException:
-                print("Элемент названия не найден!")
-                name = None
-
-            try:
-                self.humanizer.debug_element_search(browser, 'clip_address')
-                address = self.humanizer.human_like_wait_for_element(
-                    browser, (By.ID, "clip_address"), 10
-                )
-            except TimeoutException:
-                print("Элемент адреса не найден!")
-                address = None
-
-            company_info["Номер строки:"] = string_count
-            company_info["Название организации:"] = name.text
-            company_info["Адрес организации:"] = address.text
-            organizations_data_arr.append(company_info)
-        else:
-            company_info["Номер строки:"] = string_count
-            company_info["Название организации:"] = None
-            company_info["Адрес организации:"] = None
-            company_info["Название организации в род падеже:"] = None
-            company_info["Индекс:"] = None
-            organizations_data_arr.append(company_info)
-
-        self.create_complete_data(organizations_data_arr)
-        self.humanizer.close_all_except_first(browser)
-
-    def create_complete_data(self, organizations_data_arr):
-        morph = MA()
-        for company_info in organizations_data_arr:
-            if company_info["Название организации:"]:
-                upd_name = company_info["Название организации:"].title()
-                words = upd_name.split()
-                transformed_words = []
-                in_quotes = False
-
-                for word in words:
-                    if word.startswith('"') and word.endswith('"'):
-                        transformed_words.append(word)
-                    elif word.startswith('"'):
-                        in_quotes = True
-                        transformed_words.append(word)
-                    elif word.endswith('"'):
-                        in_quotes = False
-                        transformed_words.append(word)
-                    elif in_quotes:
-                        transformed_words.append(word)
-                    else:
-                        parsed = morph.parse(word)[0]
-                        transformed_word = parsed.inflect({'gent'})
-                        if transformed_word:
-                            transformed_words.append(transformed_word.word)
-                        else:
-                            transformed_words.append(word)
-                result_rod_name = ' '.join(transformed_words)
-
-                address = company_info["Адрес организации:"]
-                match = re.search(r'\b\d{6}\b', address)
-                if match:
-                    address_index = match.group()
-                else:
-                    address_index = None
-
-                company_info.update({"Название организации:": upd_name, "Название организации в род падеже:": result_rod_name, "Индекс:": address_index})
-
-            print(company_info)
-
-
-class Humanization:
-    def __init__(self):
-        self.type_pause_time = rd.uniform(0.01, 0.1)
-        self.scroll_pause_time = rd.uniform(1.0, 2.0)
-        self.scroll_up = rd.randint(100, 300)
-
-    def human_like_type(self, browser, element, text):
-        try:
-            actions = AC(browser)
-            actions.move_to_element(element)
-            actions.click()
-            actions.perform()
-
-            element.clear()
-            time.sleep(rd.uniform(0.1, 0.3))
-
-            for char in text:
-                element.send_keys(char)
-                time.sleep(self.type_pause_time)
-
-                if rd.random() < 0.05:
-                    wrong_char = rd.choice(string.ascii_lowercase)
-                    element.send_keys(wrong_char)
-                    time.sleep(rd.uniform(0.1, 0.2))
-                    element.send_keys(Keys.BACKSPACE)
-                    time.sleep(rd.uniform(0.1, 0.2))
-
-        except Exception as e:
-            print(f"Ошибка при вводе текста: {e}")
-            element.clear()
-            element.send_keys(text)
-
-    def human_like_scroll(self, browser):
-        try:
-            last_height = browser.execute_script("return document.body.scrollHeight")
-            current_scroll = 0
-
-            while current_scroll < last_height:
-                scroll_amount = rd.randint(200, 500)
-                current_scroll += scroll_amount
-
-                if current_scroll > last_height:
-                    current_scroll = last_height
-
-                browser.execute_script(f"window.scrollTo(0, {current_scroll});")
-                time.sleep(self.scroll_pause_time)
-
-                if rd.random() < 0.3:
-                    time.sleep(rd.uniform(0.5, 1.5))
-
-                new_height = browser.execute_script("return document.body.scrollHeight")
-                if new_height > last_height:
-                    last_height = new_height
-
-            if rd.random() < 0.5:
-                scroll_back = rd.randint(100, 300)
-                browser.execute_script(f"window.scrollTo(0, {current_scroll - scroll_back});")
-                time.sleep(rd.uniform(0.5, 1.0))
-
-        except Exception as e:
-            print(f"Ошибка при прокрутке: {e}")
-
-    def human_like_click(self, browser, element):
-
-        timeout = 10
-        old_tabs = browser.window_handles
-
-        try:
-            actions = AC(browser)
-
-            actions.move_to_element(element)
-            actions.perform()
-            time.sleep(rd.uniform(0.3, 0.8))
-
-            element.click()
-
-            WDW(browser, timeout).until(
-                lambda driver: len(driver.window_handles) > len(old_tabs)
-            )
-
-            new_tab = [tab for tab in browser.window_handles if tab not in old_tabs][0]
-            browser.switch_to.window(new_tab)
-
-            WDW(browser, timeout).until(
-                lambda driver: driver.execute_script("return document.readyState") == "complete"
-            )
-
-        except TimeoutException:
-            print("⚠️ Новая вкладка не открылась, возможно переход на той же странице")
-
-            WDW(browser, timeout).until(
-                lambda driver: driver.execute_script("return document.readyState") == "complete"
-            )
-
-            return True
-
-        except Exception as e:
-            print(f"❌ Ошибка: {e}")
-
-            return False
-
-    def human_like_hover(self, browser, element):
-        try:
-            actions = AC(browser)
-
-            x_offset = rd.randint(-10, 10)
-            y_offset = rd.randint(-10, 10)
-
-            actions.move_to_element_with_offset(element, x_offset, y_offset)
-            actions.perform()
-
-            time.sleep(rd.uniform(1, 2))
-
-        except Exception as e:
-            print(f"Ошибка при наведении: {e}")
-
-    def human_like_wait(self, base_seconds):
-        variation = rd.uniform(-0.3, 0.3)
-        wait_time = max(0.1, base_seconds + variation)
-        time.sleep(wait_time)
-
-    def human_like_wait_for_element(self, browser, locator, timeout=10):
-        try:
-            try:
-                _ = browser.current_url
-            except Exception:
-                print("❌ Браузер закрыт или недоступен!")
-                return None
-
-            element = WDW(browser, timeout).until(
-                EC.visibility_of_element_located(locator)
-            )
-
-            self.human_like_wait(rd.uniform(0.2, 0.8))
-            return element
-
-        except TimeoutException:
-            print(f"⏱️ Таймаут: элемент {locator} не найден за {timeout} сек")
-            return None
-
-        except WebDriverException as e:
-            print(f"❌ WebDriver ошибка для {locator}: {e.msg}")
-
-            try:
-                browser.current_url
-                print("✅ Браузер еще работает")
-            except Exception:
-                print("❌ Браузер недоступен!")
-            return None
-
-        except Exception as e:
-            print(f"❌ Неожиданная ошибка для {locator}: {type(e).__name__} - {e}")
-            return None
-
-    def random_mouse_movement(self, browser, element=None):
-        try:
-            actions = AC(browser)
-
-            if element:
-                location = element.location_once_scrolled_into_view
-                x = location['x'] + rd.randint(-50, 50)
-                y = location['y'] + rd.randint(-50, 50)
-                actions.move_by_offset(x, y)
-            else:
-                x_offset = rd.randint(-100, 100)
-                y_offset = rd.randint(-100, 100)
-                actions.move_by_offset(x_offset, y_offset)
-
-            actions.perform()
-            time.sleep(rd.uniform(0.2, 0.5))
-
-        except Exception as e:
-            print(f"Ошибка при движении мышью: {e}")
-
-    def debug_element_search(self, browser, element_id):
-        print(f"\n🔍 Диагностика элемента: {element_id}")
-        print(f"📄 URL: {browser.current_url}")
-
-        elements_by_id = browser.find_elements(By.ID, element_id)
-        print(f"✅ Найдено по ID: {len(elements_by_id)}")
-
-        all_ids = browser.execute_script("""
-            return Array.from(document.querySelectorAll('[id]'))
-                .map(el => el.id)
-                .filter(id => id.includes('clip'));
-        """)
-        print(f"📋 ID содержащие 'clip': {all_ids}")
-
-        iframes = browser.find_elements(By.TAG_NAME, "iframe")
-        print(f"🖼️ Найдено iframe: {len(iframes)}")
-
-        ready_state = browser.execute_script("return document.readyState")
-        print(f"📊 Состояние страницы: {ready_state}")
-
-        shadow_check = browser.execute_script(f"""
-            const el = document.getElementById('{element_id}');
-            if (el) return 'Элемент найден!';
-
-            const allElements = document.querySelectorAll('*');
-            for (let el of allElements) {{
-                if (el.shadowRoot) {{
-                    const shadowEl = el.shadowRoot.getElementById('{element_id}');
-                    if (shadowEl) return 'Найден в Shadow DOM';
-                }}
-            }}
-            return 'Не найден';
-        """)
-        print(f"🌓 Shadow DOM: {shadow_check}")
-
-    def close_all_except_first(self, browser):
-        first_handle = browser.window_handles[0]
-
-        while len(browser.window_handles) > 1:
-
-            for handle in browser.window_handles:
-                if handle != first_handle:
-                    browser.switch_to.window(handle)
-                    time.sleep(rd.uniform(0.3, 0.6))
-
-                    try:
-                        actions = AC(handle)
-                        actions.key_down(Keys.CONTROL).send_keys('w').key_up(Keys.CONTROL).perform()
-                        time.sleep(2)
-                    except Exception:
-                        browser.close()
-
-                    time.sleep(rd.uniform(0.5, 1.0))
-                    break
-
-        browser.switch_to.window(first_handle)
-        time.sleep(rd.uniform(0.5, 1.0))
-        print("✅ Осталась только первая вкладка")
+    app = QApplication(sys.argv)
+    window = FillExcelColumns()
+    window.show()
+    sys.exit(app.exec())

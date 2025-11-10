@@ -1,0 +1,98 @@
+/* Зона для перетаскивания файлов */
+#dropZoneLabel {
+    border: 2px dashed #2196F3;
+    padding: 30px;
+    font-size: 16px;
+    background-color: #E3F2FD;
+    border-radius: 10px;
+}
+
+/* Кнопка выбора файла */
+#browseFileButton {
+    padding: 12px;
+    font-size: 14px;
+    background-color: #2196F3;
+    color: white;
+    border: none;
+    border-radius: 5px;
+}
+
+#browseFileButton:hover {
+    background-color: #1976D2;
+}
+
+/* Кнопка запуска парсинга */
+#startParseButton {
+    padding: 15px;
+    font-size: 16px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-weight: bold;
+}
+
+#startParseButton:hover {
+    background-color: #45a049;
+}
+
+#startParseButton:disabled {
+    background-color: #cccccc;
+}
+
+/* Чекбокс GigaChat */
+#gigachatCheckbox {
+    font-size: 12px;
+    padding: 5px;
+}
+
+/* Спинбокс для попыток GigaChat */
+#gigachatRetries {
+    padding: 5px;
+}
+
+/* Прогресс бар */
+QProgressBar {
+    border: 2px solid #2196F3;
+    border-radius: 5px;
+    text-align: center;
+    height: 25px;
+}
+
+QProgressBar::chunk {
+    background-color: #4CAF50;
+}
+
+/* Лог обработки */
+#logText {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 11px;
+    background-color: #1E1E1E;
+    color: #D4D4D4;
+    border: 1px solid #333;
+    padding: 10px;
+}
+
+/* Информационная метка */
+#infoLabel {
+    color: #666;
+    font-size: 11px;
+    padding: 5px;
+}
+
+/* Общие стили для меток */
+QLabel {
+    color: #333;
+}
+
+/* Общие стили для спинбоксов */
+QSpinBox {
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+}
+
+/* Общие стили для чекбоксов */
+QCheckBox {
+    spacing: 5px;
+}

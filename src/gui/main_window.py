@@ -1,14 +1,12 @@
 """
+Главное окно приложения с вкладками для различных модулей
 """
 
-
-# import sys
+from .excel_merger_module import ExcelMerger
 from .fill_excel_columns_module import FillExcelColumns
 from PySide6.QtWidgets import (
     QWidget, QMainWindow, QVBoxLayout, QTabWidget
 )
-# from PySide6.QtCore import Qt, QMimeData
-# from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPalette
 
 
 class MainWindow(QMainWindow):
@@ -21,6 +19,7 @@ class MainWindow(QMainWindow):
         self.main_window_ui()
 
     def main_window_ui(self):
+        """Инициализация главного окна"""
         central_widget = QWidget()
         layout = QVBoxLayout()
         central_widget.setLayout(layout)
@@ -29,21 +28,22 @@ class MainWindow(QMainWindow):
         self.create_tabs(layout)
 
     def create_toggle_button_language():
+        """Переключение языка интерфейса"""
         pass
 
     def create_switch_button_theme():
+        """Переключение темы"""
         pass
 
     def create_tabs(self, layout):
+        """Создание вкладок приложения"""
         self.tab_widget = QTabWidget()
 
-        tab1 = QWidget()
+        tab1 = ExcelMerger()
         tab2 = FillExcelColumns()
-        tab3 = QWidget()
 
-        self.tab_widget.addTab(tab1, "Excel merger")
-        self.tab_widget.addTab(tab2, "Fill module")
-        self.tab_widget.addTab(tab3, "Третья вкладка")
+        self.tab_widget.addTab(tab1, "🔗 Объединение Excel")
+        self.tab_widget.addTab(tab2, "🔍 Парсинг организаций")
 
         layout.addWidget(self.tab_widget)
 
