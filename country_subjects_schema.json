@@ -1,0 +1,34 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://example.com/schemas/country_subjects.json", 
+    "title": "Субъекты РФ", 
+    "description": "Коды регионов РФ и сопоставляемые им названия регионов и округов к которым относится конкретный регион.", 
+    "type": "array",
+    "items": {
+        "type": "object",    
+        "properties": {
+            "code": {
+                "type": "string"
+            },
+            "info": {
+                "type": "object",
+                "properties": {
+                    "region": {
+                        "type": "string"
+                    },
+                    "district": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "region",
+                    "district"
+                ]
+            }
+        },
+        "required": [
+            "code",
+            "info"
+        ]
+    }
+}
