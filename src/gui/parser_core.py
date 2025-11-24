@@ -3,6 +3,7 @@
 """
 
 import re
+import json
 import random as rd
 import tempfile
 from selenium import webdriver as wd
@@ -11,6 +12,7 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.keys import Keys
 from bs4 import BeautifulSoup as BS
 
+import config
 from .humanization import Humanization
 
 
@@ -42,18 +44,23 @@ class OrganizationParser:
         """Инициализация браузера Chrome"""
         chrome_options = wd.ChromeOptions()
         chrome_options.add_argument("--window-size=1920,1080")
-        # chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--start-maximized")
+        chrome_options.add_argument("--incognito")
+        if not config.AppSettings.is_dev_mode:
+            chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--log-level=3")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
         chrome_options.add_argument(f"--user-data-dir={tempfile.mkdtemp()}")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option("useAutomationExtension", False)
-        chrome_options.add_argument(
-            "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        )
+        with open("user_agents.json", "r", encoding="utf-8") as f:
+            user_agents = json.load(f)
+        selected_user_agent = rd.choice(user_agents)
+        chrome_options.add_argument(f'--user-agent={selected_user_agent}')
 
         self.log("\n🌐 ЭТАП 2: Поиск в базах данных")
         self.log("=" * 60)
