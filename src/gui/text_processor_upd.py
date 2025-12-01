@@ -181,7 +181,7 @@ class TextProcessor(QThread):
 
     def standardize_names(self, text):
         """Заменяет полные названия на аббревиатуры"""
-        lower_text = text.lower()
+        # lower_text = text.lower()
         # Сортируем замены по длине (сначала длинные фразы)
         sorted_replacements = sorted(self.replacements.items(), key=lambda x: len(x[0]), reverse=True)
 
