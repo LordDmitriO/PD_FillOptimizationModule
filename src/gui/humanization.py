@@ -1,5 +1,6 @@
 """
 Модуль для имитации человеческого поведения в браузере
+Версия с поддержкой режимов скорости
 """
 
 import time
@@ -14,26 +15,72 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 
 
 class Humanization:
-    def __init__(self):
-        self.type_pause_time = rd.uniform(0.01, 0.1)
-        self.scroll_pause_time = rd.uniform(1.0, 2.0)
-        self.scroll_up = rd.randint(100, 300)
+    """
+    Класс хуманизации с тремя режимами работы:
+    1. 'fast' - Минимальные задержки, без опечаток. Для простых сайтов.
+    2. 'normal' - Баланс скорости и имитации. Опечатки редкие.
+    3. 'safe' - (Твой старый режим) Медленный, параноидальный. Для RusProfile и капризных защит.
+    """
+
+    # Настройки для разных режимов
+    SETTINGS = {
+        'fast': {
+            'type_speed': (0.005, 0.03),   # Очень быстрый ввод
+            'scroll_pause': (0.1, 0.4),    # Почти мгновенный скролл
+            'click_delay': (0.1, 0.3),     # Быстрый клик
+            'typo_chance': 0.0,            # Без опечаток
+            'wait_multiplier': 0.5,        # Уменьшаем все ожидания в 2 раза
+            'scroll_step': (400, 700)      # Большие шаги скролла
+        },
+        'normal': {
+            'type_speed': (0.03, 0.08),
+            'scroll_pause': (0.5, 1.0),
+            'click_delay': (0.3, 0.6),
+            'typo_chance': 0.02,           # 2% шанс опечатки
+            'wait_multiplier': 1.0,
+            'scroll_step': (200, 500)
+        },
+        'safe': {
+            'type_speed': (0.05, 0.15),
+            'scroll_pause': (1.0, 2.0),
+            'click_delay': (0.5, 1.0),
+            'typo_chance': 0.08,           # 8% шанс опечатки
+            'wait_multiplier': 1.5,        # Увеличиваем ожидания
+            'scroll_step': (150, 300)      # Мелкие шаги
+        }
+    }
+
+    def __init__(self, mode='normal'):
+        if mode not in self.SETTINGS:
+            print(f"⚠️ Режим '{mode}' не найден, включен 'normal'")
+            mode = 'normal'
+        
+        self.mode = mode
+        self.config = self.SETTINGS[mode]
 
     def human_like_type(self, browser, element, text):
+        """Ввод текста с имитацией опечаток (зависит от режима)"""
         try:
+            # В быстром режиме просто кликаем и очищаем, ввод почти мгновенный
             actions = AC(browser)
             actions.move_to_element(element)
             actions.click()
             actions.perform()
-
+            
             element.clear()
             time.sleep(rd.uniform(0.1, 0.3))
 
+            # Если режим 'fast', вводим кусками или очень быстро
+            if self.mode == 'fast':
+                element.send_keys(text)
+                return
+
             for char in text:
                 element.send_keys(char)
-                time.sleep(self.type_pause_time)
+                time.sleep(rd.uniform(*self.config['type_speed']))
 
-                if rd.random() < 0.05:
+                # Логика опечаток
+                if rd.random() < self.config['typo_chance']:
                     wrong_char = rd.choice(string.ascii_lowercase)
                     element.send_keys(wrong_char)
                     time.sleep(rd.uniform(0.1, 0.2))
@@ -46,28 +93,33 @@ class Humanization:
             element.send_keys(text)
 
     def human_like_scroll(self, browser):
+        """Прокрутка страницы. В 'fast' режиме она гораздо агрессивнее."""
         try:
             last_height = browser.execute_script("return document.body.scrollHeight")
             current_scroll = 0
+            
+            # В быстром режиме скроллим меньше раз, но большими кусками
+            step_min, step_max = self.config['scroll_step']
 
             while current_scroll < last_height:
-                scroll_amount = rd.randint(200, 500)
+                scroll_amount = rd.randint(step_min, step_max)
                 current_scroll += scroll_amount
 
                 if current_scroll > last_height:
                     current_scroll = last_height
 
                 browser.execute_script(f"window.scrollTo(0, {current_scroll});")
-                time.sleep(self.scroll_pause_time)
+                
+                # Пауза зависит от режима
+                time.sleep(rd.uniform(*self.config['scroll_pause']))
 
-                if rd.random() < 0.3:
-                    time.sleep(rd.uniform(0.5, 1.5))
-
+                # Проверка подгрузки контента (бесконечная прокрутка)
                 new_height = browser.execute_script("return document.body.scrollHeight")
                 if new_height > last_height:
                     last_height = new_height
 
-            if rd.random() < 0.5:
+            # Скролл немного вверх (только в безопасных режимах)
+            if self.mode != 'fast' and rd.random() < 0.3:
                 scroll_back = rd.randint(100, 300)
                 browser.execute_script(
                     f"window.scrollTo(0, {current_scroll - scroll_back});"
@@ -76,47 +128,6 @@ class Humanization:
 
         except Exception as e:
             print(f"Ошибка при прокрутке: {e}")
-
-    def human_like_click(self, browser, element):
-
-        timeout = 10
-        old_tabs = browser.window_handles
-
-        try:
-            actions = AC(browser)
-
-            actions.move_to_element(element)
-            actions.perform()
-            time.sleep(rd.uniform(0.3, 0.8))
-
-            element.click()
-
-            WDW(browser, timeout).until(
-                lambda driver: len(driver.window_handles) > len(old_tabs)
-            )
-
-            new_tab = [tab for tab in browser.window_handles if tab not in old_tabs][0]
-            browser.switch_to.window(new_tab)
-
-            WDW(browser, timeout).until(
-                lambda driver: driver.execute_script("return document.readyState")
-                == "complete"
-            )
-
-        except TimeoutException:
-            print("⚠️ Новая вкладка не открылась, возможно переход на той же странице")
-
-            WDW(browser, timeout).until(
-                lambda driver: driver.execute_script("return document.readyState")
-                == "complete"
-            )
-
-            return True
-
-        except Exception as e:
-            print(f"❌ Ошибка: {e}")
-
-            return False
 
     def human_like_hover(self, browser, element):
         try:
@@ -133,42 +144,61 @@ class Humanization:
         except Exception as e:
             print(f"Ошибка при наведении: {e}")
 
+    def human_like_click(self, browser, element):
+        timeout = 10
+        old_tabs = browser.window_handles
+
+        try:
+            actions = AC(browser)
+            actions.move_to_element(element)
+            actions.perform()
+            
+            # Задержка перед кликом (имитация прицеливания)
+            time.sleep(rd.uniform(*self.config['click_delay']))
+
+            element.click()
+
+            # Ждем появления новой вкладки
+            try:
+                WDW(browser, timeout).until(
+                    lambda driver: len(driver.window_handles) > len(old_tabs)
+                )
+                new_tab = [tab for tab in browser.window_handles if tab not in old_tabs][0]
+                browser.switch_to.window(new_tab)
+            except TimeoutException:
+                # Если вкладка не открылась, значит переход в текущей - это нормально
+                pass
+
+            # Ждем полной загрузки (readyState)
+            WDW(browser, timeout).until(
+                lambda driver: driver.execute_script("return document.readyState") == "complete"
+            )
+
+        except Exception as e:
+            print(f"❌ Ошибка клика: {e}")
+            return False
+        return True
+
     def human_like_wait(self, base_seconds):
-        variation = rd.uniform(-0.3, 0.3)
-        wait_time = max(0.1, base_seconds + variation)
+        """Умное ожидание с учетом множителя режима"""
+        variation = rd.uniform(-0.2, 0.2)
+        # Применяем множитель режима (например 0.5 для fast)
+        wait_time = max(0.1, (base_seconds + variation) * self.config['wait_multiplier'])
         time.sleep(wait_time)
 
     def human_like_wait_for_element(self, browser, locator, timeout=10):
         try:
-            try:
-                _ = browser.current_url
-            except Exception:
-                print("❌ Браузер закрыт или недоступен!")
-                return None
-
             element = WDW(browser, timeout).until(
                 EC.visibility_of_element_located(locator)
             )
-
-            self.human_like_wait(rd.uniform(0.2, 0.8))
+            # Небольшая пауза "на осознание", что элемент появился
+            self.human_like_wait(0.5) 
             return element
-
         except TimeoutException:
-            print(f"⏱️ Таймаут: элемент {locator} не найден за {timeout} сек")
+            # Не спамим в лог ошибками, если просто проверяем наличие
             return None
-
-        except WebDriverException as e:
-            print(f"❌ WebDriver ошибка для {locator}: {e.msg}")
-
-            try:
-                browser.current_url
-                print("✅ Браузер еще работает")
-            except Exception:
-                print("❌ Браузер недоступен!")
-            return None
-
         except Exception as e:
-            print(f"❌ Неожиданная ошибка для {locator}: {type(e).__name__} - {e}")
+            print(f"❌ Ошибка поиска {locator}: {e}")
             return None
 
     def random_mouse_movement(self, browser, element=None):

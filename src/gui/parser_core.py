@@ -7,6 +7,7 @@ import json
 import random as rd
 import tempfile
 import pymorphy3
+import time
 from selenium import webdriver as wd
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException
@@ -29,7 +30,7 @@ class OrganizationParser:
     ):
         self.log_callback = log_callback
         self.browser = None
-        self.humanizer = Humanization()
+        self.humanizer = Humanization(mode='fast')
         self.use_gigachat = use_gigachat
         self.gigachat_api = gigachat_api
         self.gigachat_retries = gigachat_retries
@@ -61,7 +62,7 @@ class OrganizationParser:
         with open("user_agents.json", "r", encoding="utf-8") as f:
             user_agents = json.load(f)
         selected_user_agent = rd.choice(user_agents)
-        chrome_options.add_argument(f'--user-agent={selected_user_agent}')
+        chrome_options.add_argument(f"--user-agent={selected_user_agent}")
 
         self.log("\n🌐 ЭТАП 2: Поиск в базах данных")
         self.log("=" * 60)
@@ -154,29 +155,32 @@ class OrganizationParser:
         """Получение родительного падежа через pymorphy3"""
         if not org_name:
             return org_name
-        
-        morph = pymorphy3.MorphAnalyzer()  # ← Изменено на pymorphy3
-        
-        # Остальной код остается без изменений
+
+        morph = pymorphy3.MorphAnalyzer()
+
         words = org_name.split()
         genitive_words = []
-        
+
         for word in words:
-            if word.startswith(('«', '"', '"')) or word.endswith(('»', '"', '"')):
+            if word.startswith(("«", '"', '"')) or word.endswith(("»", '"', '"')):
                 genitive_words.append(word)
             else:
-                clean_word = word.strip('.,;:!?')
-                punct = word[len(clean_word):] if len(word) > len(clean_word) else ''
-                
+                clean_word = word.strip(".,;:!?")
+                punct = word[len(clean_word) :] if len(word) > len(clean_word) else ""
+
                 parsed = morph.parse(clean_word)[0]
-                genitive_form = parsed.inflect({'gent'})
-                
+                genitive_form = parsed.inflect({"gent"})
+
                 if genitive_form:
-                    genitive_words.append(genitive_form.word.capitalize() if clean_word[0].isupper() else genitive_form.word + punct)
+                    genitive_words.append(
+                        genitive_form.word.capitalize()
+                        if clean_word[0].isupper()
+                        else genitive_form.word + punct
+                    )
                 else:
                     genitive_words.append(word)
-        
-        return ' '.join(genitive_words)
+
+        return " ".join(genitive_words)
 
     @staticmethod
     def normalize_organization_name(name):
@@ -188,23 +192,23 @@ class OrganizationParser:
         """
         if not name:
             return name
-        
+
         # Паттерн для поиска текста в кавычках (любые типы кавычек)
         quote_pattern = r'[«"\'"][^«»"\'""]+[»"\'""]'
-        
+
         # Находим все совпадения с кавычками и их позиции
         matches = list(re.finditer(quote_pattern, name))
-        
+
         # Если нет кавычек, просто приводим к нормальному виду
         if not matches:
             return name.capitalize()
-        
+
         result = []
         last_end = 0
-        
+
         for i, match in enumerate(matches):
             start, end = match.span()
-            
+
             # Обрабатываем текст ДО кавычек
             before_text = name[last_end:start]
             if before_text:
@@ -216,33 +220,90 @@ class OrganizationParser:
                         normalized_words.append(word.capitalize())
                     else:
                         normalized_words.append(word.lower())
-                
+
                 # Добавляем текст, сохраняя пробел в конце если он был
-                normalized_before = ' '.join(normalized_words)
-                if before_text.endswith(' '):
-                    normalized_before += ' '
+                normalized_before = " ".join(normalized_words)
+                if before_text.endswith(" "):
+                    normalized_before += " "
                 result.append(normalized_before)
-            
+
             # Обрабатываем текст В кавычках
             quoted_text = match.group()
             opening_quote = quoted_text[0]
             closing_quote = quoted_text[-1]
             inner_text = quoted_text[1:-1]
-            
+
             # Приводим к нормальному виду: первая буква заглавная, остальные строчные
             normalized_inner = inner_text.capitalize()
-            result.append(f'{opening_quote}{normalized_inner}{closing_quote}')
-            
+            result.append(f"{opening_quote}{normalized_inner}{closing_quote}")
+
             last_end = end
-        
+
         # Обрабатываем остаток текста ПОСЛЕ последних кавычек (если есть)
         if last_end < len(name):
             after_text = name[last_end:]
             words = after_text.split()
             normalized_words = [word.lower() for word in words]
-            result.append(' '.join(normalized_words))
-        
-        return ''.join(result)
+            result.append(" ".join(normalized_words))
+
+        return "".join(result)
+
+    def _handle_rusprofile_captcha(self):
+        """
+        Проверяет наличие капчи на RusProfile и ждет действий пользователя.
+        """
+        try:
+            page_title = self.browser.title.lower()
+            page_source = self.browser.page_source
+
+            # Признаки блокировки/капчи
+            is_captcha = (
+                "check" in self.browser.current_url
+                or "проверка" in page_title
+                or "ой!" in page_title
+                or "подтвердите, что вы не робот" in page_source
+                or "мы зарегистрировали подозрительный трафик" in page_source
+            )
+
+            if is_captcha:
+                self.log("\n" + "!" * 60)
+                self.log("🛑 ОБНАРУЖЕНА КАПЧА RUSPROFILE! 🛑")
+                self.log("👉 Пожалуйста, перейдите в окно браузера и решите капчу.")
+                self.log("⏳ Скрипт поставлен на паузу. Ожидание решения...")
+                self.log("!" * 60 + "\n")
+
+                # Цикл ожидания. Мы ждем, пока пользователь решит капчу и сайт
+                # перенаправит его на нормальную страницу.
+                # Признак успеха: появление заголовка с названием организации ИЛИ списка
+                while True:
+                    try:
+                        # Пробуем найти элементы успешной загрузки
+                        org_name_loaded = self.browser.find_elements(
+                            By.ID, "clip_name-long"
+                        )
+                        list_loaded = self.browser.find_elements(
+                            By.CLASS_NAME, "list-element__title"
+                        )
+
+                        # Если нашли хоть что-то из полезного контента - выходим из цикла
+                        if org_name_loaded or list_loaded:
+                            self.log("✅ Капча пройдена! Продолжаем работу...")
+                            self.humanizer.human_like_wait(
+                                2.0
+                            )  # Даем время прогрузиться до конца
+                            break
+
+                        # Проверка, не закрыл ли пользователь браузер
+                        if not self.browser.window_handles:
+                            break
+
+                    except Exception:
+                        pass
+
+                    time.sleep(2)  # Проверяем каждые 2 секунды
+
+        except Exception as e:
+            self.log(f"⚠️ Ошибка при проверке капчи: {e}")
 
     def search_rusprofile(self, org_name=None, inn=None):
         """Поиск в RusProfile по названию или ИНН"""
@@ -255,6 +316,8 @@ class OrganizationParser:
                 # Поиск по ИНН
                 self.browser.get(f"{main_url}/search?query={inn}")
                 self.humanizer.human_like_wait(rd.uniform(1.5, 2.5))
+
+                self._handle_rusprofile_captcha()
 
                 # Проверяем, открылась ли сразу страница организации
                 try:
@@ -284,6 +347,8 @@ class OrganizationParser:
                                     link = publications[0]["href"]
                                     self.browser.get(main_url + link)
                                     self.humanizer.human_like_wait(rd.uniform(1.0, 2.0))
+
+                                    self._handle_rusprofile_captcha()
                                     self.humanizer.human_like_scroll(self.browser)
                                 else:
                                     self.log("  ⚠️ Пустой список")
@@ -329,6 +394,8 @@ class OrganizationParser:
                 self.browser.get(main_url + "/search-advanced")
                 self.humanizer.human_like_wait(rd.uniform(0.5, 1.0))
 
+                self._handle_rusprofile_captcha()
+
                 try:
                     search = self.humanizer.human_like_wait_for_element(
                         self.browser, (By.ID, "advanced-search-query"), 10
@@ -341,6 +408,8 @@ class OrganizationParser:
                     self.humanizer.random_mouse_movement(self.browser, search)
                     search.send_keys(Keys.ENTER)
                     self.humanizer.human_like_wait(rd.uniform(1.0, 2.0))
+
+                    self._handle_rusprofile_captcha()
                 except TimeoutException:
                     self.log("  ⚠️ Не загрузился поиск")
                     return result
@@ -426,7 +495,16 @@ class OrganizationParser:
 
     def search_kontur_fokus(self, org_name=None, inn=None):
         """Поиск в Контур Фокус по названию или ИНН"""
-        result = {"found": False}
+        # 1. Инициализируем ВСЕ поля пустыми строками, чтобы избежать KeyError
+        result = {
+            "found": False,
+            "name": "",
+            "address": "",
+            "inn": "",
+            "ogrn": "",
+            "postal_code": "",
+            "name_genitive": ""
+        }
 
         try:
             query = inn if inn else org_name
@@ -459,25 +537,40 @@ class OrganizationParser:
                     result["ogrn"] = ogrn_match.group(1)
 
                 lines = page_text.split("\n")
+                
+                # 2. Обновленный список ключевых слов (используем корни слов)
+                keywords = [
+                    "АВТОНОМН",       # Автономная, Автономное
+                    "ГОСУДАРСТВЕНН",  # Государственная, Государственное
+                    "МУНИЦИПАЛЬН",    # Муниципальная, Муниципальное
+                    "ОБЩЕОБРАЗОВАТЕЛЬН",
+                    "ОБРАЗОВАТЕЛЬН",
+                    "БЮДЖЕТН",        # Бюджетное, Бюджетная
+                    "КАЗЕНН",
+                    "УЧРЕЖДЕНИЕ",
+                    "ШКОЛА",
+                    "ЛИЦЕЙ",
+                    "ГИМНАЗИЯ",
+                    "САД",
+                    "ООО ",
+                    "АО ",
+                    "ПАО "
+                ]
+
                 for line in lines:
-                    if any(
-                        word in line.upper()
-                        for word in [
-                            "АВТОНОМНАЯ",
-                            "ГОСУДАРСТВЕННАЯ",
-                            "МУНИЦИПАЛЬНАЯ",
-                            "ОБЩЕОБРАЗОВАТЕЛЬНАЯ",
-                            "НЕКОММЕРЧЕСКАЯ",
-                        ]
-                    ):
-                        if len(line) > 20 and "ИНН" not in line:
+                    upper_line = line.upper()
+                    # Ищем совпадение по корням
+                    if any(word in upper_line for word in keywords):
+                        # Проверяем, что это не просто строка с ИНН и она достаточно длинная
+                        if len(line) > 10 and "ИНН" not in line and "ОГРН" not in line:
                             result["name"] = line.strip()
                             result["name_genitive"] = self.get_genitive_case_pymorphy(result["name"])
                             break
 
                 address_match = re.search(
-                    r"(\d{6})[,\s]+([^\n]+(?:обл|край|респ|г\.|г |область)[^\n]+)",
+                    r"(\d{6})[,\s]+([^\n]+(?:обл|край|респ|г\.|г |область|севастополь)[^\n]+)",
                     page_text,
+                    re.IGNORECASE
                 )
                 if address_match:
                     result["address"] = (
@@ -485,11 +578,16 @@ class OrganizationParser:
                     )
                     result["postal_code"] = address_match.group(1)
 
+                # Логика: если нашли хотя бы ИНН или Имя - считаем успехом
                 if result["inn"] or result["name"]:
                     result["found"] = True
                     self.log(f"  ✅ ИНН: {result['inn']}, ОГРН: {result['ogrn']}")
+                    
                     if result["name"]:
                         self.log(f"  📝 {result['name'][:70]}...")
+                    else:
+                        self.log("  ⚠️ Имя не удалось извлечь из текста")
+                        
                     if result["address"]:
                         self.log(f"  📍 {result['address'][:70]}...")
 
@@ -553,7 +651,9 @@ class OrganizationParser:
                     )
                     if name_match:
                         result["name"] = name_match.group(1).strip()
-                        result["name_genitive"] = self.get_genitive_case_pymorphy(result["name"])
+                        result["name_genitive"] = self.get_genitive_case_pymorphy(
+                            result["name"]
+                        )
 
                     address_match = re.search(r"Адрес[:\s]*([^\n]+)", detail_text)
                     if address_match:
