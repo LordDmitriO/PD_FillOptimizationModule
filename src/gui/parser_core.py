@@ -495,16 +495,7 @@ class OrganizationParser:
 
     def search_kontur_fokus(self, org_name=None, inn=None):
         """Поиск в Контур Фокус по названию или ИНН"""
-        # 1. Инициализируем ВСЕ поля пустыми строками, чтобы избежать KeyError
-        result = {
-            "found": False,
-            "name": "",
-            "address": "",
-            "inn": "",
-            "ogrn": "",
-            "postal_code": "",
-            "name_genitive": ""
-        }
+        result = {"found": False}
 
         try:
             query = inn if inn else org_name
@@ -531,46 +522,30 @@ class OrganizationParser:
                 inn_match = re.search(r"ИНН[:\s]*(\d{10,12})", page_text)
                 if inn_match:
                     result["inn"] = inn_match.group(1)
-
                 ogrn_match = re.search(r"ОГРН[:\s]*(\d{13,15})", page_text)
                 if ogrn_match:
                     result["ogrn"] = ogrn_match.group(1)
 
                 lines = page_text.split("\n")
-                
-                # 2. Обновленный список ключевых слов (используем корни слов)
-                keywords = [
-                    "АВТОНОМН",       # Автономная, Автономное
-                    "ГОСУДАРСТВЕНН",  # Государственная, Государственное
-                    "МУНИЦИПАЛЬН",    # Муниципальная, Муниципальное
-                    "ОБЩЕОБРАЗОВАТЕЛЬН",
-                    "ОБРАЗОВАТЕЛЬН",
-                    "БЮДЖЕТН",        # Бюджетное, Бюджетная
-                    "КАЗЕНН",
-                    "УЧРЕЖДЕНИЕ",
-                    "ШКОЛА",
-                    "ЛИЦЕЙ",
-                    "ГИМНАЗИЯ",
-                    "САД",
-                    "ООО ",
-                    "АО ",
-                    "ПАО "
-                ]
-
                 for line in lines:
-                    upper_line = line.upper()
-                    # Ищем совпадение по корням
-                    if any(word in upper_line for word in keywords):
-                        # Проверяем, что это не просто строка с ИНН и она достаточно длинная
-                        if len(line) > 10 and "ИНН" not in line and "ОГРН" not in line:
+                    if any(
+                        word in line.upper()
+                        for word in [
+                            "АВТОНОМНАЯ",
+                            "ГОСУДАРСТВЕННАЯ",
+                            "МУНИЦИПАЛЬНАЯ",
+                            "ОБЩЕОБРАЗОВАТЕЛЬНАЯ",
+                            "НЕКОММЕРЧЕСКАЯ",
+                        ]
+                    ):
+                        if len(line) > 20 and "ИНН" not in line:
                             result["name"] = line.strip()
                             result["name_genitive"] = self.get_genitive_case_pymorphy(result["name"])
                             break
 
                 address_match = re.search(
-                    r"(\d{6})[,\s]+([^\n]+(?:обл|край|респ|г\.|г |область|севастополь)[^\n]+)",
+                    r"(\d{6})[,\s]+([^\n]+(?:обл|край|респ|г\.|г |область)[^\n]+)",
                     page_text,
-                    re.IGNORECASE
                 )
                 if address_match:
                     result["address"] = (
@@ -578,16 +553,11 @@ class OrganizationParser:
                     )
                     result["postal_code"] = address_match.group(1)
 
-                # Логика: если нашли хотя бы ИНН или Имя - считаем успехом
                 if result["inn"] or result["name"]:
                     result["found"] = True
                     self.log(f"  ✅ ИНН: {result['inn']}, ОГРН: {result['ogrn']}")
-                    
                     if result["name"]:
                         self.log(f"  📝 {result['name'][:70]}...")
-                    else:
-                        self.log("  ⚠️ Имя не удалось извлечь из текста")
-                        
                     if result["address"]:
                         self.log(f"  📍 {result['address'][:70]}...")
 
@@ -598,6 +568,7 @@ class OrganizationParser:
             self.log(f"  ⚠️ Ошибка: {str(e)}")
 
         return result
+
 
     def search_egrul(self, org_name):
         """Поиск в ЕГРЮЛ"""
