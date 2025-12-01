@@ -6,6 +6,7 @@ import re
 import json
 import random as rd
 import tempfile
+import pymorphy3
 from selenium import webdriver as wd
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException
@@ -147,6 +148,101 @@ class OrganizationParser:
 
         self.log("❌ Не найдено нигде")
         return result
+
+    @staticmethod
+    def get_genitive_case_pymorphy(org_name):
+        """Получение родительного падежа через pymorphy3"""
+        if not org_name:
+            return org_name
+        
+        morph = pymorphy3.MorphAnalyzer()  # ← Изменено на pymorphy3
+        
+        # Остальной код остается без изменений
+        words = org_name.split()
+        genitive_words = []
+        
+        for word in words:
+            if word.startswith(('«', '"', '"')) or word.endswith(('»', '"', '"')):
+                genitive_words.append(word)
+            else:
+                clean_word = word.strip('.,;:!?')
+                punct = word[len(clean_word):] if len(word) > len(clean_word) else ''
+                
+                parsed = morph.parse(clean_word)[0]
+                genitive_form = parsed.inflect({'gent'})
+                
+                if genitive_form:
+                    genitive_words.append(genitive_form.word.capitalize() if clean_word[0].isupper() else genitive_form.word + punct)
+                else:
+                    genitive_words.append(word)
+        
+        return ' '.join(genitive_words)
+
+    @staticmethod
+    def normalize_organization_name(name):
+        """
+        Приводит название организации к нормальному виду:
+        - Первое слово с заглавной буквы
+        - Остальные слова со строчной
+        - Текст в кавычках с заглавной первой буквы
+        """
+        if not name:
+            return name
+        
+        # Паттерн для поиска текста в кавычках (любые типы кавычек)
+        quote_pattern = r'[«"\'"][^«»"\'""]+[»"\'""]'
+        
+        # Находим все совпадения с кавычками и их позиции
+        matches = list(re.finditer(quote_pattern, name))
+        
+        # Если нет кавычек, просто приводим к нормальному виду
+        if not matches:
+            return name.capitalize()
+        
+        result = []
+        last_end = 0
+        
+        for i, match in enumerate(matches):
+            start, end = match.span()
+            
+            # Обрабатываем текст ДО кавычек
+            before_text = name[last_end:start]
+            if before_text:
+                words = before_text.split()
+                normalized_words = []
+                for j, word in enumerate(words):
+                    # Первое слово всего названия - с заглавной
+                    if last_end == 0 and j == 0:
+                        normalized_words.append(word.capitalize())
+                    else:
+                        normalized_words.append(word.lower())
+                
+                # Добавляем текст, сохраняя пробел в конце если он был
+                normalized_before = ' '.join(normalized_words)
+                if before_text.endswith(' '):
+                    normalized_before += ' '
+                result.append(normalized_before)
+            
+            # Обрабатываем текст В кавычках
+            quoted_text = match.group()
+            opening_quote = quoted_text[0]
+            closing_quote = quoted_text[-1]
+            inner_text = quoted_text[1:-1]
+            
+            # Приводим к нормальному виду: первая буква заглавная, остальные строчные
+            normalized_inner = inner_text.capitalize()
+            result.append(f'{opening_quote}{normalized_inner}{closing_quote}')
+            
+            last_end = end
+        
+        # Обрабатываем остаток текста ПОСЛЕ последних кавычек (если есть)
+        if last_end < len(name):
+            after_text = name[last_end:]
+            words = after_text.split()
+            normalized_words = [word.lower() for word in words]
+            result.append(' '.join(normalized_words))
+        
+        return ''.join(result)
 
     def search_rusprofile(self, org_name=None, inn=None):
         """Поиск в RusProfile по названию или ИНН"""
@@ -301,6 +397,8 @@ class OrganizationParser:
                 return result
 
             result["name"] = name_elem.text.strip()
+            result["name"] = self.normalize_organization_name(result["name"])
+            result["name_genitive"] = self.get_genitive_case_pymorphy(result["name"])
             result["address"] = address_elem.text.strip()
 
             postal_match = re.search(r"\b(\d{6})\b", result["address"])
@@ -374,6 +472,7 @@ class OrganizationParser:
                     ):
                         if len(line) > 20 and "ИНН" not in line:
                             result["name"] = line.strip()
+                            result["name_genitive"] = self.get_genitive_case_pymorphy(result["name"])
                             break
 
                 address_match = re.search(
@@ -454,6 +553,7 @@ class OrganizationParser:
                     )
                     if name_match:
                         result["name"] = name_match.group(1).strip()
+                        result["name_genitive"] = self.get_genitive_case_pymorphy(result["name"])
 
                     address_match = re.search(r"Адрес[:\s]*([^\n]+)", detail_text)
                     if address_match:

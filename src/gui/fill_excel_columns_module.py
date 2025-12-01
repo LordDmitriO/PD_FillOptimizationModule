@@ -82,6 +82,7 @@ class ParserThread(QThread):
 
             # Инициализируем колонки пустыми значениями
             self.df["Полное название"] = ""
+            self.df["Родительный падеж"] = ""
             self.df["Адрес"] = ""
             self.df["Индекс"] = ""
             self.df["ИНН"] = ""
@@ -103,6 +104,7 @@ class ParserThread(QThread):
                 result = self.parser.search_organization(org_name)
 
                 self.df.at[row_idx, "Полное название"] = result.get("name", "")
+                self.df.at[row_idx, "Родительный падеж"] = result.get("name_genitive", "")
                 self.df.at[row_idx, "Адрес"] = result.get("address", "")
                 self.df.at[row_idx, "Индекс"] = result.get("postal_code", "")
                 self.df.at[row_idx, "ИНН"] = result.get("inn", "")
