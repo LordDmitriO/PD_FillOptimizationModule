@@ -10,7 +10,7 @@ from .settings import run_settings_dialog
 from PySide6.QtWidgets import (
     QWidget, QMainWindow, QVBoxLayout, QTabWidget, QToolButton
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QCoreApplication, QSettings
 
 
 class MainWindow(QMainWindow):
@@ -20,9 +20,35 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Fill optimization module")
         self.resize(640, 480)
 
-        self.is_dev_mode = config.AppSettings.is_dev_mode
+        self.is_dev_mode = config.UserAppSettings.is_dev_mode
+
+        QCoreApplication.setOrganizationName("MosPolyProgPD")
+        QCoreApplication.setApplicationName("FillOptimizationModule")
+        self.settings = QSettings(QSettings.Scope.UserScope)
+        self.settings.setDefaultFormat(QSettings.Format.NativeFormat)
+        self.load_settings()
 
         self.main_window_ui()
+
+    def load_settings(self):
+        geometry = self.settings.value("window_geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+        else:
+            self.resize(640, 480)
+
+        if self.settings.contains("dev_mode"):
+            self.is_dev_mode = self.settings.value("dev_mode", type=bool)
+        else:
+            self.is_dev_mode = config.DefaultAppSettings.is_dev_mode
+
+        print(f"Загружены настройки: Режим разработчика = {self.is_dev_mode}")
+
+    def closeEvent(self, event):
+        """Событие закрытия окна (крестик)"""
+        self.settings.setValue("window_geometry", self.saveGeometry())
+
+        event.accept()
 
     def main_window_ui(self):
         """Инициализация главного окна"""
@@ -63,15 +89,9 @@ class MainWindow(QMainWindow):
     def on_settings_clicked(self):
         """Обработчик нажатия на кнопку"""
 
-        new_settings = run_settings_dialog(self, config.AppSettings.is_dev_mode)
-
-        config.AppSettings.is_dev_mode = new_settings["dev_mode"]
-        self.is_dev_mode = config.AppSettings.is_dev_mode
-
-        if self.is_dev_mode:
-            print("Режим разработчика включен")
-        else:
-            print("Режим разработчика выключен")
+        new_settings = run_settings_dialog(self, self.is_dev_mode)
+        self.is_dev_mode = new_settings["dev_mode"]
+        config.UserAppSettings.is_dev_mode = new_settings["dev_mode"]
 
     def set_language(self):
         pass

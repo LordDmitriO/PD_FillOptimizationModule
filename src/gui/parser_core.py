@@ -46,7 +46,7 @@ class OrganizationParser:
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("--start-maximized")
         chrome_options.add_argument("--incognito")
-        if not config.AppSettings.is_dev_mode:
+        if not config.UserAppSettings.is_dev_mode:
             chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
