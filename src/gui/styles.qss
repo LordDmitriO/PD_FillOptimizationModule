@@ -80,6 +80,16 @@ QProgressBar::chunk {
     padding: 5px;
 }
 
+/* Информация о загруженном файле */
+#fileInfoLabel {
+    color: #666;
+    font-size: 12px;
+    padding: 8px;
+    background-color: #F5F5F5;
+    border-radius: 5px;
+    border: 1px solid #E0E0E0;
+}
+
 /* Общие стили для меток */
 QLabel {
     color: #333;

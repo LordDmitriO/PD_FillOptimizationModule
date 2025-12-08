@@ -45,11 +45,11 @@ class MainWindow(QMainWindow):
         """Создание вкладок приложения и кнопки настроек"""
         self.tab_widget = QTabWidget()
 
-        tab1 = ExcelMerger()
-        tab2 = FillExcelColumns()
+        tab1 = FillExcelColumns()
+        tab2 = ExcelMerger()
 
-        self.tab_widget.addTab(tab1, "🔗 Объединение Excel")
-        self.tab_widget.addTab(tab2, "🔍 Парсинг организаций")
+        self.tab_widget.addTab(tab1, "🔍 Парсинг организаций")
+        self.tab_widget.addTab(tab2, "🔗 Объединение Excel")
 
         self.settings_button = QToolButton()
         self.settings_button.setText("⚙️")
@@ -72,6 +72,26 @@ class MainWindow(QMainWindow):
             print("Режим разработчика включен")
         else:
             print("Режим разработчика выключен")
+
+    def closeEvent(self, event):
+        """Обработка закрытия главного окна"""
+        # Корректно завершаем все потоки во вкладках
+        for i in range(self.tab_widget.count()):
+            widget = self.tab_widget.widget(i)
+            if hasattr(widget, 'stop_parsing') and widget.is_parsing:
+                # Останавливаем парсинг если он выполняется
+                widget.stop_parsing()
+            if hasattr(widget, 'parser_thread') and widget.parser_thread:
+                if widget.parser_thread.isRunning():
+                    widget.parser_thread._stop_requested = True
+                    if widget.parser_thread.parser:
+                        try:
+                            widget.parser_thread.parser.close_browser()
+                        except:
+                            pass
+                    widget.parser_thread.wait(3000)
+        
+        event.accept()
 
     def set_language(self):
         pass
