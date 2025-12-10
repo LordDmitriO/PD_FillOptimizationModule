@@ -11,7 +11,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains as AC
 from selenium.webdriver.support.ui import WebDriverWait as WDW
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import TimeoutException
 
 
 class Humanization:
@@ -54,7 +54,7 @@ class Humanization:
         if mode not in self.SETTINGS:
             print(f"⚠️ Режим '{mode}' не найден, включен 'normal'")
             mode = 'normal'
-        
+
         self.mode = mode
         self.config = self.SETTINGS[mode]
 
@@ -66,7 +66,7 @@ class Humanization:
             actions.move_to_element(element)
             actions.click()
             actions.perform()
-            
+
             element.clear()
             time.sleep(rd.uniform(0.1, 0.3))
 
@@ -97,7 +97,7 @@ class Humanization:
         try:
             last_height = browser.execute_script("return document.body.scrollHeight")
             current_scroll = 0
-            
+
             # В быстром режиме скроллим меньше раз, но большими кусками
             step_min, step_max = self.config['scroll_step']
 
@@ -109,7 +109,7 @@ class Humanization:
                     current_scroll = last_height
 
                 browser.execute_script(f"window.scrollTo(0, {current_scroll});")
-                
+
                 # Пауза зависит от режима
                 time.sleep(rd.uniform(*self.config['scroll_pause']))
 
@@ -152,7 +152,7 @@ class Humanization:
             actions = AC(browser)
             actions.move_to_element(element)
             actions.perform()
-            
+
             # Задержка перед кликом (имитация прицеливания)
             time.sleep(rd.uniform(*self.config['click_delay']))
 
@@ -192,7 +192,7 @@ class Humanization:
                 EC.visibility_of_element_located(locator)
             )
             # Небольшая пауза "на осознание", что элемент появился
-            self.human_like_wait(0.5) 
+            self.human_like_wait(0.5)
             return element
         except TimeoutException:
             # Не спамим в лог ошибками, если просто проверяем наличие

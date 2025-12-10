@@ -114,14 +114,14 @@ class ParserThread(QThread):
                 if self._stop_requested:
                     self.log_message.emit("\n⚠️ Получен запрос на остановку парсинга")
                     break
-                
+
                 # Ожидание снятия паузы
                 while self._paused and not self._stop_requested:
                     self.msleep(100)  # Небольшая задержка, чтобы не нагружать CPU
-                
+
                 if self._stop_requested:
                     break
-                
+
                 self.progress.emit(idx, len(self.data))
                 self.log_message.emit(f"\n{'='*60}")
                 self.log_message.emit(f"📋 [{idx}/{len(self.data)}] {org_name}")
@@ -167,7 +167,7 @@ class ParserThread(QThread):
                     if self._stop_requested:
                         self.log_message.emit("\n⚠️ Получен запрос на остановку парсинга")
                         break
-                    
+
                     if gigachat_attempts_used >= self.gigachat_retries:
                         self.log_message.emit(
                             f"\n⚠️ Достигнут лимит попыток GigaChat ({self.gigachat_retries})"
@@ -318,14 +318,14 @@ class FillExcelColumns(QWidget):
         self.start_parse_button.setObjectName("startParseButton")
         self.start_parse_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.start_parse_button.setEnabled(False)  # Неактивна до загрузки файла
-        
+
         self.pause_button = QPushButton("⏸ Пауза")
         self.pause_button.clicked.connect(self.toggle_pause)
         self.pause_button.setObjectName("pauseButton")
         self.pause_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.pause_button.setEnabled(False)  # Неактивна до начала парсинга
         self.pause_button.setVisible(False)  # Скрыта до начала парсинга
-        
+
         buttons_layout.addWidget(self.start_parse_button)
         buttons_layout.addWidget(self.pause_button)
         buttons_layout.addStretch()
@@ -333,7 +333,7 @@ class FillExcelColumns(QWidget):
         # Группа настроек парсинга
         settings_group = QGroupBox("⚙️ Настройки парсинга")
         settings_layout = QVBoxLayout()
-        
+
         # Настройка скорости хуманизации
         humanization_layout = QHBoxLayout()
         humanization_layout.addWidget(QLabel("⚡ Скорость хуманизации:"))
@@ -382,7 +382,7 @@ class FillExcelColumns(QWidget):
         recaptcha_layout.addWidget(self.recaptcha_checkbox)
         recaptcha_layout.addStretch()
         settings_layout.addLayout(recaptcha_layout)
-        
+
         settings_group.setLayout(settings_layout)
 
         # Прогресс бар
@@ -641,7 +641,7 @@ class FillExcelColumns(QWidget):
         use_gigachat = self.gigachat_checkbox.isChecked()
         retries = self.gigachat_retries.value()
         use_recaptcha = self.recaptcha_checkbox.isChecked()  # НОВОЕ
-        
+
         # Получаем режим хуманизации из выпадающего списка
         mode_index = self.humanization_mode.currentIndex()
         humanization_modes = ["fast", "normal", "safe"]
@@ -659,7 +659,7 @@ class FillExcelColumns(QWidget):
         """Переключение паузы/возобновления парсинга"""
         if not self.is_parsing or not self.parser_thread:
             return
-        
+
         if self.is_paused:
             # Возобновляем парсинг
             self.is_paused = False
@@ -683,23 +683,23 @@ class FillExcelColumns(QWidget):
             # Устанавливаем флаг остановки для корректного завершения
             self.parser_thread._stop_requested = True
             self.parser_thread._paused = False  # Снимаем паузу
-            
+
             # Закрываем браузер если он открыт
             if self.parser_thread.parser:
                 try:
                     self.parser_thread.parser.close_browser()
                 except Exception as e:
                     self.add_log(f"\n⚠️ Ошибка при закрытии браузера: {e}")
-            
+
             # Ждем завершения потока (максимум 5 секунд)
             if not self.parser_thread.wait(5000):
                 # Если поток не завершился за 5 секунд, принудительно завершаем
                 self.add_log("\n⚠️ Принудительное завершение потока...")
                 self.parser_thread.terminate()
                 self.parser_thread.wait(1000)
-            
+
             self.add_log("\n⚠️ Парсинг остановлен пользователем")
-        
+
         self.is_parsing = False
         self.reset_ui_after_parsing()
 
