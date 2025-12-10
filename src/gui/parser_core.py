@@ -253,6 +253,7 @@ class OrganizationParser:
         Проверяет наличие капчи на RusProfile и ждет действий пользователя.
         """
         try:
+            page_text = self.browser.find_element(By.TAG_NAME, "body").text
             page_title = self.browser.title.lower()
             page_source = self.browser.page_source
 
@@ -260,7 +261,7 @@ class OrganizationParser:
             is_captcha = (
                 "check" in self.browser.current_url
                 or "проверка" in page_title
-                or "ой!" in page_title
+                or "Я не робот" in page_text
                 or "подтвердите, что вы не робот" in page_source
                 or "мы зарегистрировали подозрительный трафик" in page_source
             )
@@ -524,7 +525,7 @@ class OrganizationParser:
 
                 page_text = self.browser.find_element(By.TAG_NAME, "body").text
 
-                if "Найдено 0" in page_text or "Ничего не найдено" in page_text:
+                if "Найдено 0" in page_text or "не найдено" in page_text:
                     self.log("  ⚠️ Нет результатов")
                     return result
 

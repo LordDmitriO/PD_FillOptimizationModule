@@ -39,6 +39,7 @@ class MainWindow(QMainWindow):
 
         if self.settings.contains("dev_mode"):
             self.is_dev_mode = self.settings.value("dev_mode", type=bool)
+            config.UserAppSettings.is_dev_mode = self.settings.value("dev_mode", type=bool)
         else:
             self.is_dev_mode = config.DefaultAppSettings.is_dev_mode
 
