@@ -79,16 +79,16 @@ class TextProcessor(QThread):
         try:
             # Инициализируем LanguageTool с настройкой кэширования
             self.log("🔧 Инициализация проверки орфографии...")
-
+            
             # Настраиваем кэш для LanguageTool, чтобы не скачивать каждый раз
             cache_dir = os.path.expanduser("~/.cache/language_tool_python")
             os.makedirs(cache_dir, exist_ok=True)
-
+            
             # Устанавливаем путь к кэшу через переменную окружения
             # Это заставит библиотеку использовать существующий кэш
             if "LANGUAGETOOL_CACHE_DIR" not in os.environ:
                 os.environ["LANGUAGETOOL_CACHE_DIR"] = cache_dir
-
+            
             # Пытаемся использовать локальную установку LanguageTool (если есть)
             local_lt_path = "/opt/languagetool"
             if os.path.exists(local_lt_path):
@@ -105,22 +105,22 @@ class TextProcessor(QThread):
                             break
                     if jar_found:
                         break
-
+            
             # Проверяем, есть ли уже скачанный LanguageTool в кэше
             cache_zip = os.path.join(cache_dir, "LanguageTool-latest-snapshot.zip")
             cache_extracted = os.path.join(cache_dir, "LanguageTool-latest-snapshot")
-
+            
             if os.path.exists(cache_zip) or os.path.exists(cache_extracted):
                 self.log(f"✅ Найден кэш LanguageTool в {cache_dir}")
                 self.log("📦 Использую кэшированную версию (без повторной загрузки)")
             else:
                 self.log("📥 LanguageTool не найден в кэше, будет выполнена загрузка (только при первом запуске)")
-
+            
             # Отключаем проверку обновлений через переменную окружения
             # Это предотвратит повторную загрузку при каждом запуске
             if "LANGUAGETOOL_DISABLE_UPDATE_CHECK" not in os.environ:
                 os.environ["LANGUAGETOOL_DISABLE_UPDATE_CHECK"] = "1"
-
+            
             # Инициализируем LanguageTool
             # Библиотека автоматически использует кэш, если он существует
             # При первом запуске загрузит LanguageTool, при последующих - использует кэш
