@@ -46,7 +46,23 @@ class MainWindow(QMainWindow):
         print(f"Загружены настройки: Режим разработчика = {self.is_dev_mode}")
 
     def closeEvent(self, event):
-        """Событие закрытия окна (крестик)"""
+        """Обработка закрытия главного окна"""
+        # Корректно завершаем все потоки во вкладках
+        for i in range(self.tab_widget.count()):
+            widget = self.tab_widget.widget(i)
+            if hasattr(widget, 'stop_parsing') and widget.is_parsing:
+                # Останавливаем парсинг если он выполняется
+                widget.stop_parsing()
+            if hasattr(widget, 'parser_thread') and widget.parser_thread:
+                if widget.parser_thread.isRunning():
+                    widget.parser_thread._stop_requested = True
+                    if widget.parser_thread.parser:
+                        try:
+                            widget.parser_thread.parser.close_browser()
+                        except Exception:
+                            pass
+                    widget.parser_thread.wait(3000)
+
         self.settings.setValue("window_geometry", self.saveGeometry())
 
         event.accept()

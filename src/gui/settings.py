@@ -1,7 +1,6 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
-    QCheckBox, QPushButton, QMessageBox,
-    QRadioButton
+    QCheckBox, QPushButton, QMessageBox
 )
 from PySide6.QtCore import Qt, QCoreApplication, QSettings
 
