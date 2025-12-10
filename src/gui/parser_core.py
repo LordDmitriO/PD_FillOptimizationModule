@@ -51,7 +51,7 @@ class BaseSearcher:
                 genitive_words.append(word)
             else:
                 clean_word = word.strip(".,;:!?")
-                punct = word[len(clean_word) :] if len(word) > len(clean_word) else ""
+                punct = word[len(clean_word):] if len(word) > len(clean_word) else ""
 
                 parsed = morph.parse(clean_word)[0]
                 genitive_form = parsed.inflect({"gent"})
@@ -167,7 +167,7 @@ class RusProfileSearcher(BaseSearcher):
                     or self.browser.find_elements(By.CLASS_NAME, "list-element__title")
                     or self.browser.find_elements(By.CLASS_NAME, "company-name")
                 )
-                
+
                 # Проверяем наличие сообщения "не найдено"
                 body = self.browser.find_element(By.TAG_NAME, "body")
                 page_text = body.text.lower()
@@ -176,7 +176,7 @@ class RusProfileSearcher(BaseSearcher):
                     or "не найдено организаций" in page_text
                     or "попробуйте смягчить фильтры" in page_text
                 )
-                
+
                 # Если есть результаты или сообщение "не найдено" - это не капча
                 if has_results or has_no_results_message:
                     return
@@ -189,17 +189,17 @@ class RusProfileSearcher(BaseSearcher):
                 recaptcha_iframes = self.browser.find_elements(
                     By.CSS_SELECTOR, "iframe[src*='recaptcha'], iframe[title*='reCAPTCHA']"
                 )
-                
+
                 # Проверяем наличие формы капчи
                 captcha_forms = self.browser.find_elements(
                     By.CSS_SELECTOR, "form[id*='captcha'], form[class*='captcha']"
                 )
-                
+
                 # Проверяем наличие конкретных текстов о капче/роботе
                 body = self.browser.find_element(By.TAG_NAME, "body")
                 page_text = body.text.lower()
                 page_source_lower = self.browser.page_source.lower()
-                
+
                 # Конкретные фразы, которые указывают на капчу
                 captcha_phrases = [
                     "вы робот",
@@ -208,10 +208,10 @@ class RusProfileSearcher(BaseSearcher):
                     "проверка на робота",
                     "вы похожи на робота",
                 ]
-                
+
                 has_captcha_text = any(phrase in page_text for phrase in captcha_phrases)
                 has_recaptcha_widget = "g-recaptcha" in page_source_lower or "recaptcha/api.js" in page_source_lower
-                
+
                 # Капча есть только если:
                 # 1. Есть iframe с recaptcha ИЛИ
                 # 2. Есть форма капчи ИЛИ
@@ -221,17 +221,17 @@ class RusProfileSearcher(BaseSearcher):
                     or len(captcha_forms) > 0
                     or (has_captcha_text and has_recaptcha_widget)
                 )
-                
+
                 if not is_captcha:
                     return  # Капчи нет, выходим
-                    
+
             except Exception:
                 # Если не можем проверить элементы, используем старую логику как fallback
                 try:
                     body = self.browser.find_element(By.TAG_NAME, "body")
                     page_text = body.text.lower()
                     page_source_lower = self.browser.page_source.lower()
-                    
+
                     # Только если есть и "робот" в тексте, и recaptcha в коде
                     if "робот" in page_text and ("g-recaptcha" in page_source_lower or "recaptcha/api.js" in page_source_lower):
                         pass  # Продолжаем обработку капчи
@@ -291,7 +291,7 @@ class RusProfileSearcher(BaseSearcher):
                             self.log("✅ Капча успешно пройдена!")
                             self.log("!" * 60 + "\n")
                             return
-                    except:
+                    except Exception:
                         pass
 
                     self.log("⚠️ Капча все еще на месте после попытки решения.")
@@ -366,17 +366,17 @@ class RusProfileSearcher(BaseSearcher):
         """Расшифровывает все аббревиатуры в тексте, но НЕ заменяет аббревиатуры внутри кавычек"""
         if not text:
             return text
-        
+
         rules = self._load_standardization_rules()
         result = text
         abbreviations = rules.get("abbreviations", {})
-        
+
         # Извлекаем все части текста в кавычках, чтобы не заменять аббревиатуры внутри них
         quote_pattern = r'["\'«»][^"\']+["\'»]'
         quoted_parts = []
         for match in re.finditer(quote_pattern, result):
             quoted_parts.append((match.start(), match.end(), match.group()))
-        
+
         # Создаем версию текста без кавычек для замены
         text_without_quotes = result
         placeholders = {}
@@ -384,63 +384,63 @@ class RusProfileSearcher(BaseSearcher):
             placeholder = f"__QUOTE_PLACEHOLDER_{i}__"
             placeholders[placeholder] = quoted_text
             text_without_quotes = text_without_quotes[:start] + placeholder + text_without_quotes[end:]
-        
+
         # Сначала заменяем ОПФ (организационно-правовые формы) в начале строки
         # Сортируем по длине (от длинных к коротким), чтобы сначала заменять составные аббревиатуры
         opf_abbreviations = sorted(
-            [(abbr, full_form) for abbr, full_form in abbreviations.items() 
-             if abbr in ["АНОО", "АНО", "МБОУ", "ГБОУ", "МАОУ", "МКОУ", "ГКОУ", 
-                        "ЧОУ", "НЧОУ", "ФГБОУ", "ФГАОУ", "ГАОУ", "ГБПОУ", "ГАПОУ"]],
+            [(abbr, full_form) for abbr, full_form in abbreviations.items()
+             if abbr in ["АНОО", "АНО", "МБОУ", "ГБОУ", "МАОУ", "МКОУ", "ГКОУ",
+                         "ЧОУ", "НЧОУ", "ФГБОУ", "ФГАОУ", "ГАОУ", "ГБПОУ", "ГАПОУ"]],
             key=lambda x: len(x[0]),
             reverse=True
         )
-        
+
         for abbr, full_form in opf_abbreviations:
             # Ищем ОПФ в начале строки (только вне кавычек)
             pattern = r'^' + re.escape(abbr) + r'\s+'
             if re.search(pattern, text_without_quotes, re.IGNORECASE):
                 text_without_quotes = re.sub(pattern, full_form + " ", text_without_quotes, flags=re.IGNORECASE)
                 break  # Заменяем только первую найденную ОПФ в начале
-        
+
         # Затем заменяем остальные аббревиатуры (сортируем по длине для правильной замены)
         # Исключаем короткие аббревиатуры (1-2 символа), которые могут быть частью других слов
         other_abbreviations = sorted(
-            [(abbr, full_form) for abbr, full_form in abbreviations.items() 
-             if abbr not in ["АНОО", "АНО", "МБОУ", "ГБОУ", "МАОУ", "МКОУ", "ГКОУ", 
-                            "ЧОУ", "НЧОУ", "ФГБОУ", "ФГАОУ", "ГАОУ", "ГБПОУ", "ГАПОУ"]
+            [(abbr, full_form) for abbr, full_form in abbreviations.items()
+             if abbr not in ["АНОО", "АНО", "МБОУ", "ГБОУ", "МАОУ", "МКОУ", "ГКОУ",
+                             "ЧОУ", "НЧОУ", "ФГБОУ", "ФГАОУ", "ГАОУ", "ГБПОУ", "ГАПОУ"]
              and len(abbr) >= 3],  # Только аббревиатуры длиной 3+ символа
             key=lambda x: len(x[0]),
             reverse=True
         )
-        
+
         for abbr, full_form in other_abbreviations:
             # Ищем аббревиатуру как отдельное слово (только вне кавычек)
             pattern = r'\b' + re.escape(abbr) + r'\b'
             if re.search(pattern, text_without_quotes, re.IGNORECASE):
                 text_without_quotes = re.sub(pattern, full_form, text_without_quotes, flags=re.IGNORECASE)
-        
+
         # Восстанавливаем кавычки обратно
         result = text_without_quotes
         for placeholder, quoted_text in placeholders.items():
             result = result.replace(placeholder, quoted_text)
-        
+
         return result
 
     def _is_educational_keyword(self, text):
         """Проверяет, содержит ли текст образовательные ключевые слова"""
         if not text:
             return False
-        
+
         text_lower = text.lower()
         rules = self._load_standardization_rules()
-        
+
         # Проверяем аббревиатуры (как отдельные слова)
         for abbr in rules.get("abbreviations", {}).keys():
             # Ищем аббревиатуру как отдельное слово
             pattern = r'\b' + re.escape(abbr.lower()) + r'\b'
             if re.search(pattern, text_lower):
                 return True
-        
+
         # Проверяем образовательные ключевые слова
         edu_keywords = [
             "школа", "сош", "лицей", "гимназия", "колледж", "университет",
@@ -448,39 +448,39 @@ class RusProfileSearcher(BaseSearcher):
             "доу", "дворец творчества", "дом творчества", "центр детского",
             "центр развития", "центр образования"
         ]
-        
+
         # Проверяем точные совпадения для более надежной проверки
         for keyword in edu_keywords:
             if keyword in text_lower:
                 return True
-        
+
         return False
 
     def _has_unique_words(self, text, original_text=None):
         """Проверяет, содержит ли текст уникальные слова (не только общие образовательные термины)"""
         if not text:
             return False
-        
+
         text_lower = text.lower()
-        
+
         # Общие образовательные слова, которые не являются уникальными (загружаем из файла)
         rules = self._load_standardization_rules()
         common_edu_words = set(rules.get("common_words", []))
-        
+
         # Извлекаем все слова из текста
         words = set(re.findall(r'\b[А-ЯЁа-яё]{3,}\b', text_lower))
-        
+
         # Убираем общие слова
         unique_words = words - common_edu_words
-        
+
         # Если есть уникальные слова - это хорошо
         if unique_words:
             return True
-        
+
         # Если есть слова в кавычках - это тоже уникально
         if re.search(r'["\'«»][^"\']+["\'»]', text):
             return True
-        
+
         # Если передан оригинальный текст, проверяем совпадение уникальных слов
         if original_text:
             original_words = set(re.findall(r'\b[А-ЯЁа-яё]{3,}\b', original_text.lower()))
@@ -489,13 +489,13 @@ class RusProfileSearcher(BaseSearcher):
                 # Если есть пересечение уникальных слов - это хорошо
                 if original_unique.intersection(unique_words):
                     return True
-        
+
         # Если нет уникальных слов - это слишком общий вариант
         return False
 
     def _validate_organization_result(self, org_name, result, check_keyword_match=True):
         """Проверяет валидность найденной организации
-        
+
         Args:
             org_name: Оригинальное название для поиска (может быть пустым для поиска по ИНН)
             result: Результат поиска с данными организации
@@ -503,14 +503,14 @@ class RusProfileSearcher(BaseSearcher):
         """
         if not result.get("found") or not result.get("name"):
             return False
-        
+
         found_name = result["name"].lower()
-        
+
         # Проверяем, что найденная организация - образовательное учреждение
         if not self._is_educational_keyword(found_name):
             self.log(f"  ⚠️ Найдена организация не является образовательным учреждением: {found_name[:70]}...")
             return False
-        
+
         # Проверяем негативные ключевые слова
         negative_keywords = [
             "прекращение деятельности",
@@ -526,46 +526,46 @@ class RusProfileSearcher(BaseSearcher):
             "снт",
             "тсн",
         ]
-        
+
         for neg_keyword in negative_keywords:
             if neg_keyword in found_name:
                 self.log(f"  ⚠️ Найдена организация содержит негативное ключевое слово '{neg_keyword}': {found_name[:70]}...")
                 return False
-        
+
         # Проверяем совпадение ключевых слов только если указано оригинальное название
         if check_keyword_match and org_name:
             original_name = org_name.lower()
             # Извлекаем ключевые слова из оригинального названия
             original_words = set(re.findall(r'\b[А-ЯЁа-яё]{3,}\b', original_name))
             found_words = set(re.findall(r'\b[А-ЯЁа-яё]{3,}\b', found_name))
-            
+
             # Исключаем общие слова (загружаем из файла)
             rules = self._load_standardization_rules()
             common_words = set(rules.get("common_words", []))
             original_words -= common_words
             found_words -= common_words
-            
+
             # Извлекаем слова в кавычках из оригинального названия (это очень важные уникальные слова)
             quoted_words_original = set()
             quoted_matches = re.findall(r'["\'«»]([^"\']+)["\'»]', original_name)
             for quoted_text in quoted_matches:
                 quoted_words_original.update(re.findall(r'\b[А-ЯЁа-яё]{3,}\b', quoted_text.lower()))
             quoted_words_original -= common_words
-            
+
             # Проверяем совпадение уникальных слов
             if original_words and found_words:
                 intersection = original_words.intersection(found_words)
                 if not intersection:
                     self.log(f"  ⚠️ Нет совпадения ключевых слов между '{org_name[:50]}...' и '{found_name[:50]}...'")
                     return False
-                
+
                 # Если есть слова в кавычках, они должны обязательно совпадать
                 if quoted_words_original:
                     quoted_intersection = quoted_words_original.intersection(found_words)
                     if not quoted_intersection:
                         self.log(f"  ⚠️ Не найдено совпадения уникальных слов из кавычек '{org_name[:50]}...' в '{found_name[:50]}...'")
                         return False
-        
+
         return True
 
     def generate_search_variants(self, org_name):
@@ -769,7 +769,7 @@ class RusProfileSearcher(BaseSearcher):
                         self.browser, (By.CLASS_NAME, "list-element__title"), 5
                     )
                     if not search_result:
-                        self.log(f"     ⚠️ Нет результатов")
+                        self.log("     ⚠️ Нет результатов")
                         # Очищаем результат перед следующей попыткой
                         result["found"] = False
                         result["name"] = ""
@@ -780,7 +780,7 @@ class RusProfileSearcher(BaseSearcher):
                         result["name_genitive"] = ""
                         continue
                 except TimeoutException:
-                    self.log(f"     ⚠️ Нет результатов")
+                    self.log("     ⚠️ Нет результатов")
                     # Очищаем результат перед следующей попыткой
                     result["found"] = False
                     result["name"] = ""
@@ -796,7 +796,7 @@ class RusProfileSearcher(BaseSearcher):
                 publications = soup.find_all("a", {"class": "list-element__title"})
 
                 if not publications:
-                    self.log(f"     ⚠️ Пустой список")
+                    self.log("     ⚠️ Пустой список")
                     # Очищаем результат перед следующей попыткой
                     result["found"] = False
                     result["name"] = ""
@@ -832,7 +832,7 @@ class RusProfileSearcher(BaseSearcher):
                         self.log(f"  ✅ Успешно найдено (вариант {attempt})")
                         return result
                     else:
-                        self.log(f"     ⚠️ Найденная организация не прошла проверку валидности, продолжаю поиск...")
+                        self.log("     ⚠️ Найденная организация не прошла проверку валидности, продолжаю поиск...")
                         # Полностью очищаем результат для следующей попытки
                         result["found"] = False
                         result["name"] = ""
@@ -843,7 +843,7 @@ class RusProfileSearcher(BaseSearcher):
                         result["name_genitive"] = ""
                         continue
                 else:
-                    self.log(f"     ⚠️ Не удалось извлечь данные")
+                    self.log("     ⚠️ Не удалось извлечь данные")
                     # Очищаем результат на случай, если там остались данные от предыдущей попытки
                     result["found"] = False
                     result["name"] = ""
@@ -866,7 +866,7 @@ class RusProfileSearcher(BaseSearcher):
                 result["name_genitive"] = ""
                 continue
 
-        self.log(f"  ❌ Не найдено ни по одному варианту")
+        self.log("  ❌ Не найдено ни по одному варианту")
         return result
 
     def _search_by_inn(self, main_url, inn, result):
@@ -1238,7 +1238,7 @@ class EgrulSearcher(BaseSearcher):
 
                 candidates.append((score, res, text))
 
-            except Exception as e:
+            except Exception:
                 continue
 
         if not candidates:
@@ -1247,7 +1247,7 @@ class EgrulSearcher(BaseSearcher):
         # Сортируем по убыванию релевантности
         candidates.sort(key=lambda x: x[0], reverse=True)
 
-        self.log(f"  📊 Релевантность топ-3:")
+        self.log("  📊 Релевантность топ-3:")
         for i, (score, _, text) in enumerate(candidates[:3], 1):
             self.log(f"    {i}. {score} баллов - {text[:60]}...")
 
@@ -1418,7 +1418,7 @@ class OrganizationParser:
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("--start-maximized")
         chrome_options.add_argument("--incognito")
-        if not config.AppSettings.is_dev_mode:
+        if not config.UserAppSettings.is_dev_mode:
             chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
