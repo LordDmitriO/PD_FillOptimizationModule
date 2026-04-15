@@ -1,6 +1,6 @@
+import re
 import sys
 import pandas as pd
-import re
 import traceback
 from pathlib import Path
 from openpyxl import load_workbook
@@ -12,20 +12,58 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
+PHONE_CLEAN_PATTERN = re.compile(r'\D')
 
-def process_data(series):
-    """Очистка и форматирование телефонных и прочих полей"""
-    return series.apply(
-        lambda x: x.strip().lower() if isinstance(x, str) else str(x).strip().lower()
-    ).apply(
-        lambda x: [
-            num.strip().replace('8', '+7', 1).replace(' ', '').replace('(', '').replace(')', '').replace('-', '')
-            if num.strip().startswith('8') else
-            "+7" + num.strip()[1:].replace(' ', '').replace('(', '').replace(')', '').replace('-', '')
-            if num.strip().startswith('7') else num.strip().replace(' ', '').replace('(', '').replace(')', '').replace('-', '')
-            for num in x.split(';') if isinstance(x, str) and len(num.strip()) > 5 and '_' not in num
-        ] if isinstance(x, str) and x.lower() != 'nan' else []
-    )
+
+def _format_phone_number(number: str) -> str:
+    """Функция, которая очищает телефонный номер от лишних символов и приводит его к формату +7XXXXXXXXXX."""
+    cleaned_phone_number = PHONE_CLEAN_PATTERN.sub("", number)
+
+    if len(cleaned_phone_number) == 11 and cleaned_phone_number.startswith(("7", "8")):
+        return "+7" + cleaned_phone_number[1:]
+
+    if len(cleaned_phone_number) == 10:
+        return "+7" + cleaned_phone_number
+
+    return ""
+
+
+def _process_cell_data(cell_value) -> list[str]:
+    """Функция, которая обрабатывает содержимое одной ячейки."""
+    if pd.isna(cell_value):
+        return []
+
+    cell_value_string = str(cell_value).strip().lower()
+    if cell_value_string in ("nan", "none", ""):
+        return []
+
+    processed_numbers = []
+    split_numbers = re.split(r'[;,]+', cell_value_string)
+    for number in split_numbers:
+        formatted_number = _format_phone_number(number)
+        if formatted_number:
+            processed_numbers.append(formatted_number)
+
+    return processed_numbers
+
+
+def process_data(series: pd.Series) -> pd.Series:
+    """Функция, которая очищает и форматирует поля с телефонными номерами и прочие поля."""
+    return series.apply(_process_cell_data)
+
+# def process_data(series):
+#     """Очистка и форматирование телефонных и прочих полей"""
+#     return series.apply(
+#         lambda x: x.strip().lower() if isinstance(x, str) else str(x).strip().lower()
+#     ).apply(
+#         lambda x: [
+#             num.strip().replace('8', '+7', 1).replace(' ', '').replace('(', '').replace(')', '').replace('-', '')
+#             if num.strip().startswith('8') else
+#             "+7" + num.strip()[1:].replace(' ', '').replace('(', '').replace(')', '').replace('-', '')
+#             if num.strip().startswith('7') else num.strip().replace(' ', '').replace('(', '').replace(')', '').replace('-', '')
+#             for num in x.split(';') if isinstance(x, str) and len(num.strip()) > 5 and '_' not in num
+#         ] if isinstance(x, str) and x.lower() != 'nan' else []
+#     )
 
 
 def generate_fio_variants(fio):
@@ -92,6 +130,7 @@ def merge_excel(df1, df2, common_fields):
     # Конкатенируем результаты по всем парам и удаляем глобальные дубликаты
     result = pd.concat(merged_all, ignore_index=True)
     result = result.drop_duplicates(subset=['_idx1', '_idx2'])
+
     return result
 
 
