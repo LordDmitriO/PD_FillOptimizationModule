@@ -73,6 +73,55 @@ def generate_fio_variants(fio) -> list[str]:
     return list(fio_variants)
 
 
+def merge_excel(df1: pd.DataFrame, df2: pd.DataFrame, common_fields: list) -> pd.DataFrame:
+    """"""
+    if not common_fields or df1.empty or df2.empty:
+        return pd.DataFrame()
+
+    df1_copy = df1.copy().reset_index(drop=True)
+    df2_copy = df2.copy().reset_index(drop=True)
+
+    valid_pairs = None
+
+    for field1, field2 in common_fields:
+        if "фио" in field1.lower() and "фио" in field2.lower():
+            keys1 = df1_copy[field1].apply(generate_fio_variants)
+            keys2 = df2_copy[field2].apply(generate_fio_variants)
+        else:
+            keys1 = process_data(df1_copy[field1])
+            keys2 = process_data(df2_copy[field2])
+
+        temp1 = pd.DataFrame({"_idx1": df1_copy.index, "join_key": keys1}).explode("join_key")
+        temp2 = pd.DataFrame({"_idx2": df2_copy.index, "join_key": keys2}).explode("join_key")
+        temp1 = temp1[temp1["join_key"].astype(bool)]
+        temp2 = temp2[temp2["join_key"].astype(bool)]
+
+        merged = pd.merge(temp1, temp2, on="join_key", how="inner")
+
+        current_pairs = set(zip(merged['_idx1'], merged['_idx2']))
+        if valid_pairs is None:
+            valid_pairs = current_pairs
+        else:
+            valid_pairs = valid_pairs.intersection(current_pairs)
+
+        if not valid_pairs:
+            break
+
+    if not valid_pairs:
+        return pd.DataFrame()
+
+    pairs_df = pd.DataFrame(list(valid_pairs), columns=['_idx1', '_idx2'])
+
+    df1_copy['_idx1'] = df1_copy.index
+    df2_copy['_idx2'] = df2_copy.index
+
+    result = pd.merge(pairs_df, df1_copy, on='_idx1', how='inner')
+    result = pd.merge(result, df2_copy, on='_idx2', how='inner', suffixes=('_1', '_2'))
+
+    # result = result.drop(columns=['_idx1', '_idx2'])
+
+    return result
+
 # def process_data(series):
 #     """Очистка и форматирование телефонных и прочих полей"""
 #     return series.apply(
@@ -115,45 +164,45 @@ def generate_fio_variants(fio) -> list[str]:
 #     return list(variants)
 
 
-def merge_excel(df1, df2, common_fields):
-    """Объединение DataFrame с использованием логики ФИО и списков"""
-    merged_all = []
+# def merge_excel(df1, df2, common_fields):
+#     """Объединение DataFrame с использованием логики ФИО и списков"""
+#     merged_all = []
 
-    for field1, field2 in common_fields:
-        df1_copy = df1.copy().reset_index(drop=False).rename(columns={'index': '_idx1'})
-        df2_copy = df2.copy().reset_index(drop=False).rename(columns={'index': '_idx2'})
+#     for field1, field2 in common_fields:
+#         df1_copy = df1.copy().reset_index(drop=False).rename(columns={'index': '_idx1'})
+#         df2_copy = df2.copy().reset_index(drop=False).rename(columns={'index': '_idx2'})
 
-        # Эвристика: если в названии столбца есть 'фио', используем генератор вариантов
-        if 'фио' in field1.lower() and 'фио' in field2.lower():
-            df1_copy['join_key'] = df1_copy[field1].fillna('').apply(generate_fio_variants)
-            df2_copy['join_key'] = df2_copy[field2].fillna('').apply(generate_fio_variants)
-        else:
-            df1_copy['join_key'] = process_data(df1_copy[field1])
-            df2_copy['join_key'] = process_data(df2_copy[field2])
+#         # Эвристика: если в названии столбца есть 'фио', используем генератор вариантов
+#         if 'фио' in field1.lower() and 'фио' in field2.lower():
+#             df1_copy['join_key'] = df1_copy[field1].fillna('').apply(generate_fio_variants)
+#             df2_copy['join_key'] = df2_copy[field2].fillna('').apply(generate_fio_variants)
+#         else:
+#             df1_copy['join_key'] = process_data(df1_copy[field1])
+#             df2_copy['join_key'] = process_data(df2_copy[field2])
 
-        # Раскрываем списки ключей в отдельные строки
-        temp1 = df1_copy.explode('join_key')
-        temp2 = df2_copy.explode('join_key')
+#         # Раскрываем списки ключей в отдельные строки
+#         temp1 = df1_copy.explode('join_key')
+#         temp2 = df2_copy.explode('join_key')
 
-        # Убираем пустые ключи
-        temp1 = temp1[temp1['join_key'].notna() & (temp1['join_key'] != '')]
-        temp2 = temp2[temp2['join_key'].notna() & (temp2['join_key'] != '')]
+#         # Убираем пустые ключи
+#         temp1 = temp1[temp1['join_key'].notna() & (temp1['join_key'] != '')]
+#         temp2 = temp2[temp2['join_key'].notna() & (temp2['join_key'] != '')]
 
-        # Объединяем
-        merged = pd.merge(temp1, temp2, on='join_key', how='inner', suffixes=('_1', '_2'))
+#         # Объединяем
+#         merged = pd.merge(temp1, temp2, on='join_key', how='inner', suffixes=('_1', '_2'))
 
-        # Удаляем дубликаты в рамках текущей пары объединения
-        merged = merged.drop_duplicates(subset=['_idx1', '_idx2'])
-        merged_all.append(merged)
+#         # Удаляем дубликаты в рамках текущей пары объединения
+#         merged = merged.drop_duplicates(subset=['_idx1', '_idx2'])
+#         merged_all.append(merged)
 
-    if not merged_all:
-        return pd.DataFrame()
+#     if not merged_all:
+#         return pd.DataFrame()
 
-    # Конкатенируем результаты по всем парам и удаляем глобальные дубликаты
-    result = pd.concat(merged_all, ignore_index=True)
-    result = result.drop_duplicates(subset=['_idx1', '_idx2'])
+#     # Конкатенируем результаты по всем парам и удаляем глобальные дубликаты
+#     result = pd.concat(merged_all, ignore_index=True)
+#     result = result.drop_duplicates(subset=['_idx1', '_idx2'])
 
-    return result
+#     return result
 
 
 # Паттерн удаляет: [, ], ', "
@@ -299,9 +348,9 @@ class MergerTab(QWidget):
                 QMessageBox.information(self, "Результат", "Совпадений не найдено.")
                 return
 
-            # if 'ФИО_1' in merged_df.columns:
-            #     merged_df = merged_df.sort_values(by='ФИО_1').reset_index(drop=True)
-            merged_df = merged_df.sort_values(by="Личный номер дела").reset_index(drop=True)
+            if 'ФИО_1' in merged_df.columns:
+                merged_df = merged_df.sort_values(by='ФИО_1').reset_index(drop=True)
+            # merged_df = merged_df.sort_values(by="Личный номер дела").reset_index(drop=True)
 
             unique_count = merged_df['_idx1'].nunique() if '_idx1' in merged_df.columns else 0
 
