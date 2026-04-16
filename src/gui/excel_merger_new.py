@@ -74,7 +74,7 @@ def generate_fio_variants(fio) -> list[str]:
 
 
 def merge_excel(df1: pd.DataFrame, df2: pd.DataFrame, common_fields: list) -> pd.DataFrame:
-    """"""
+    """Функция, которая объединяет DataFrame."""
     if not common_fields or df1.empty or df2.empty:
         return pd.DataFrame()
 
