@@ -2,6 +2,7 @@ import re
 import sys
 import pandas as pd
 import traceback
+from itertools import permutations
 from pathlib import Path
 from openpyxl import load_workbook
 
@@ -51,6 +52,27 @@ def process_data(series: pd.Series) -> pd.Series:
     """Функция, которая очищает и форматирует поля с телефонными номерами и прочие поля."""
     return series.apply(_process_cell_data)
 
+
+def generate_fio_variants(fio) -> list[str]:
+    """Функция, которая генерирует различные возможные перестановки ФИО для последующего гибкого сравнения."""
+    if pd.isna(fio) or not isinstance(fio, str):
+        return []
+
+    normalized_fio = fio.strip().lower().replace("ё", "е")
+    if not normalized_fio:
+        return []
+
+    fio_parts = normalized_fio.split()
+    fio_parts = fio_parts[:4]
+
+    fio_variants = set()
+    for permutation_length in range(1, len(fio_parts) + 1):
+        for fio_combination in permutations(fio_parts, permutation_length):
+            fio_variants.add(" ".join(fio_combination))
+
+    return list(fio_variants)
+
+
 # def process_data(series):
 #     """Очистка и форматирование телефонных и прочих полей"""
 #     return series.apply(
@@ -66,31 +88,31 @@ def process_data(series: pd.Series) -> pd.Series:
 #     )
 
 
-def generate_fio_variants(fio):
-    """Генерация перестановок ФИО для гибкого сравнения"""
-    variants = set()
-    if not isinstance(fio, str) or pd.isna(fio):
-        return []
+# def generate_fio_variants(fio):
+#     """Генерация перестановок ФИО для гибкого сравнения"""
+#     variants = set()
+#     if not isinstance(fio, str) or pd.isna(fio):
+#         return []
 
-    fio_norm = fio.strip().lower().replace('ё', 'е')
-    parts = fio_norm.split()
+#     fio_norm = fio.strip().lower().replace('ё', 'е')
+#     parts = fio_norm.split()
 
-    if len(parts) == 1:
-        variants.add(fio_norm)
-    elif len(parts) == 2:
-        variants.add(parts[0] + ' ' + parts[1])
-        variants.add(parts[1] + ' ' + parts[0])
-    elif len(parts) == 3:
-        variants.add(parts[0] + ' ' + parts[1])
-        variants.add(parts[0] + ' ' + parts[2])
-        variants.add(parts[2] + ' ' + parts[1] + ' ' + parts[0])
-        variants.add(parts[2] + ' ' + parts[0] + ' ' + parts[1])
-        variants.add(parts[1] + ' ' + parts[0] + ' ' + parts[2])
-        variants.add(parts[1] + ' ' + parts[2] + ' ' + parts[0])
-        variants.add(parts[0] + ' ' + parts[2] + ' ' + parts[1])
+#     if len(parts) == 1:
+#         variants.add(fio_norm)
+#     elif len(parts) == 2:
+#         variants.add(parts[0] + ' ' + parts[1])
+#         variants.add(parts[1] + ' ' + parts[0])
+#     elif len(parts) == 3:
+#         variants.add(parts[0] + ' ' + parts[1])
+#         variants.add(parts[0] + ' ' + parts[2])
+#         variants.add(parts[2] + ' ' + parts[1] + ' ' + parts[0])
+#         variants.add(parts[2] + ' ' + parts[0] + ' ' + parts[1])
+#         variants.add(parts[1] + ' ' + parts[0] + ' ' + parts[2])
+#         variants.add(parts[1] + ' ' + parts[2] + ' ' + parts[0])
+#         variants.add(parts[0] + ' ' + parts[2] + ' ' + parts[1])
 
-    variants.add(' '.join(parts))
-    return list(variants)
+#     variants.add(' '.join(parts))
+#     return list(variants)
 
 
 def merge_excel(df1, df2, common_fields):
@@ -277,8 +299,9 @@ class MergerTab(QWidget):
                 QMessageBox.information(self, "Результат", "Совпадений не найдено.")
                 return
 
-            if 'ФИО_1' in merged_df.columns:
-                merged_df = merged_df.sort_values(by='ФИО_1').reset_index(drop=True)
+            # if 'ФИО_1' in merged_df.columns:
+            #     merged_df = merged_df.sort_values(by='ФИО_1').reset_index(drop=True)
+            merged_df = merged_df.sort_values(by="Личный номер дела").reset_index(drop=True)
 
             unique_count = merged_df['_idx1'].nunique() if '_idx1' in merged_df.columns else 0
 
