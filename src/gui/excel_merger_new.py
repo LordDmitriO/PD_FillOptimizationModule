@@ -3,6 +3,7 @@ import sys
 import pandas as pd
 import traceback
 from itertools import permutations
+from typing import Callable
 from pathlib import Path
 from openpyxl import load_workbook
 
@@ -14,6 +15,18 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 PHONE_CLEAN_PATTERN = re.compile(r'\D')
+
+
+def _normalize_cell_data(cell_value) -> str:
+    """"""
+    if pd.isna(cell_value):
+        return ""
+
+    cell_value_string = str(cell_value).strip().lower()
+    if cell_value_string in ("nan", "none", ""):
+        return ""
+
+    return cell_value_string
 
 
 def _format_phone_number(number: str) -> str:
@@ -29,13 +42,10 @@ def _format_phone_number(number: str) -> str:
     return ""
 
 
-def _process_cell_data(cell_value) -> list[str]:
+def _process_phone_cell(cell_value) -> list[str]:
     """Функция, которая обрабатывает содержимое одной ячейки."""
-    if pd.isna(cell_value):
-        return []
-
-    cell_value_string = str(cell_value).strip().lower()
-    if cell_value_string in ("nan", "none", ""):
+    cell_value_string = _normalize_cell_data(cell_value)
+    if not cell_value_string:
         return []
 
     processed_numbers = []
@@ -48,29 +58,41 @@ def _process_cell_data(cell_value) -> list[str]:
     return processed_numbers
 
 
-def process_data(series: pd.Series) -> pd.Series:
+def process_data(series: pd.Series, func: Callable) -> pd.Series:
     """Функция, которая очищает и форматирует поля с телефонными номерами и прочие поля."""
-    return series.apply(_process_cell_data)
+    return series.apply(func)
 
 
-def generate_fio_variants(fio) -> list[str]:
+def _generate_fio_variants(fio) -> list[str]:
     """Функция, которая генерирует различные возможные перестановки ФИО для последующего гибкого сравнения."""
-    if pd.isna(fio) or not isinstance(fio, str):
+    if not isinstance(fio, str):
         return []
 
-    normalized_fio = fio.strip().lower().replace("ё", "е")
+    normalized_fio = _normalize_cell_data(fio)
     if not normalized_fio:
         return []
+
+    normalized_fio = normalized_fio.replace("ё", "е")
 
     fio_parts = normalized_fio.split()
     fio_parts = fio_parts[:4]
 
     fio_variants = set()
-    for permutation_length in range(1, len(fio_parts) + 1):
+    min_length = 2
+    for permutation_length in range(min_length, len(fio_parts) + 1):
         for fio_combination in permutations(fio_parts, permutation_length):
             fio_variants.add(" ".join(fio_combination))
 
     return list(fio_variants)
+
+
+def _process_generic_cell(cell_value) -> list[str]:
+    """Функция, которая обрабатывает содержимое одной ячейки, кроме ячеек с ФИО и номерами."""
+    cell_value_string = _normalize_cell_data(cell_value)
+    if cell_value_string:
+        return [cell_value_string]
+    else:
+        return []
 
 
 def merge_excel(df1: pd.DataFrame, df2: pd.DataFrame, common_fields: list) -> pd.DataFrame:
@@ -84,12 +106,18 @@ def merge_excel(df1: pd.DataFrame, df2: pd.DataFrame, common_fields: list) -> pd
     valid_pairs = None
 
     for field1, field2 in common_fields:
-        if "фио" in field1.lower() and "фио" in field2.lower():
-            keys1 = df1_copy[field1].apply(generate_fio_variants)
-            keys2 = df2_copy[field2].apply(generate_fio_variants)
+        field1_lower = field1.lower()
+        field2_lower = field2.lower()
+        if "фио" in field1_lower and "фио" in field2_lower:
+            keys1 = process_data(df1_copy[field1], _generate_fio_variants)
+            keys2 = process_data(df2_copy[field2], _generate_fio_variants)
+        elif (any(key_word in field1_lower for key_word in ["номер", "телефон"]) and
+              any(key_word in field2_lower for key_word in ["номер", "телефон"])):
+            keys1 = process_data(df1_copy[field1], _process_phone_cell)
+            keys2 = process_data(df2_copy[field2], _process_phone_cell)
         else:
-            keys1 = process_data(df1_copy[field1])
-            keys2 = process_data(df2_copy[field2])
+            keys1 = process_data(df1_copy[field1], _process_generic_cell)
+            keys2 = process_data(df2_copy[field2], _process_generic_cell)
 
         temp1 = pd.DataFrame({"_idx1": df1_copy.index, "join_key": keys1}).explode("join_key")
         temp2 = pd.DataFrame({"_idx2": df2_copy.index, "join_key": keys2}).explode("join_key")
